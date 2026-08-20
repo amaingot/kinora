@@ -10,10 +10,12 @@ spec:
   {{- if not .Values.server.autoscaling.enabled }}
   replicas: {{ .Values.server.replicaCount }}
   {{- end }}
-  {{- if include "kinora.localStorage.enabled" . }}
-  {{- /* The artifact PVC is ReadWriteOnce, so a RollingUpdate deadlocks: the new pod stays
-       Pending on a volume the old pod still holds, and the old pod never terminates because
-       the rollout is waiting on the new one. */}}
+  {{- if and (include "kinora.localStorage.enabled" .) (not (has "ReadWriteMany" .Values.storage.local.accessModes)) }}
+  {{- /* A ReadWriteOnce artifact PVC deadlocks a RollingUpdate: the new pod stays Pending on a
+       volume the old pod still holds, and the old pod never terminates because the rollout is
+       waiting on the new one. A ReadWriteMany volume mounts on every node at once, so it rolls
+       like the S3 case does - and RWX is exactly the local-storage shape _validations.tpl
+       requires before it will allow more than one replica. */}}
   strategy:
     type: Recreate
   {{- else }}

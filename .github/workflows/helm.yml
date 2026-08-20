@@ -83,7 +83,7 @@ jobs:
           base="-f $CHART_DIR/ci/default-values.yaml"
           # shellcheck disable=SC2086 # $base is two intentional words
           {
-            fail_expected "missing publicUrl"             --set publicUrl=
+            fail_expected "missing publicUrl"             $base --set publicUrl=
             fail_expected "publicUrl with a path"         $base --set publicUrl=https://k.example.com/kinora
             fail_expected "missing AUTH_SECRET"           $base --set auth.secret=
             fail_expected "missing POSTGRES_PASSWORD"     $base --set postgres.password=

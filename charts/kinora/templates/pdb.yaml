@@ -8,10 +8,17 @@ metadata:
   name: {{ include (printf "kinora.%s.fullname" $component) $ }}
   labels: {{- include "kinora.componentLabels" (dict "ctx" $ "component" $component) | nindent 4 }}
 spec:
-  {{- if $cfg.pdb.maxUnavailable }}
+  {{- /* An explicit nil test, not truthiness: `maxUnavailable: 0` is a legal and meaningful
+       policy - "allow no voluntary disruption at all" - but Helm treats 0 as false, so a plain
+       `if` would silently ignore it and emit the default minAvailable instead, inverting the
+       requested policy. Both fields also accept a percentage string ("25%"), which is why the
+       value is rendered as-is rather than coerced. */}}
+  {{- if not (kindIs "invalid" $cfg.pdb.maxUnavailable) }}
   maxUnavailable: {{ $cfg.pdb.maxUnavailable }}
-  {{- else }}
+  {{- else if not (kindIs "invalid" $cfg.pdb.minAvailable) }}
   minAvailable: {{ $cfg.pdb.minAvailable }}
+  {{- else }}
+  {{- fail (printf "\nkinora: %s.pdb.enabled=true needs either minAvailable or maxUnavailable.\n\nWith both null the PodDisruptionBudget renders with an empty spec, which the API server\naccepts and then ignores - it protects nothing.\n\n  --set %s.pdb.minAvailable=1\n" $component $component) }}
   {{- end }}
   selector:
     matchLabels: {{- include "kinora.selectorLabels" (dict "ctx" $ "component" $component) | nindent 6 }}

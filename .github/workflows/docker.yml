@@ -138,19 +138,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # latest tracks main AND the newest app-v* release (metadata-action treats a tag ref as
-      # the default branch, so is_default_branch is true for both); X.Y.Z / X.Y come from the
-      # tag and no-op on a main push; sha-<7> pins an exact commit (KINORA_IMAGE_TAG in
-      # selfhost/.env, image.tag in charts/kinora/values.yaml).
+      # X.Y.Z / X.Y come from the app-v* tag and no-op on a main push; sha-<7> pins an exact
+      # commit (KINORA_IMAGE_TAG in selfhost/.env, image.tag in charts/kinora/values.yaml).
+      # latest tracks main (is_default_branch, which is false on a tag ref) and the newest
+      # app-v* release (latest=auto, below).
       - name: Image metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.IMAGE }}
+          # The default, spelled out: this is what puts `latest` on an app-v* release, and it
+          # deliberately skips prereleases - app-v1.0.0-rc.1 publishes 1.0.0-rc.1 and nothing else.
+          flavor: latest=auto
+          # `match` extracts the bare version from the tag: metadata-action parses the whole ref
+          # name, and `app-v0.2.0` is not valid semver, so without it both rules warn and no-op
+          # and a release publishes nothing but sha-<7> - leaving the chart's appVersion image
+          # tag missing and every default `helm install` in ImagePullBackOff.
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},match=^app-v(.*)$
+            type=semver,pattern={{major}}.{{minor}},match=^app-v(.*)$
             type=sha
 
       - name: Create manifest list and push

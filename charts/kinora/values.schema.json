@@ -475,8 +475,7 @@
               "enum": [
                 "ClusterIP",
                 "NodePort",
-                "LoadBalancer",
-                "ExternalName"
+                "LoadBalancer"
               ]
             },
             "port": {
@@ -724,8 +723,7 @@
               "enum": [
                 "ClusterIP",
                 "NodePort",
-                "LoadBalancer",
-                "ExternalName"
+                "LoadBalancer"
               ]
             },
             "port": {
@@ -754,7 +752,7 @@
             },
             "proxyReadTimeout": {
               "type": "string",
-              "pattern": "^[0-9]+(ms|s|m|h)?$"
+              "pattern": "^[0-9]+s?$"
             },
             "contentSecurityPolicy": {
               "type": "string"

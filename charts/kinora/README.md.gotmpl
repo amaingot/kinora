@@ -85,10 +85,17 @@ increasing precedence:
 | 1 | inline values (`auth.secret`, `postgres.password`, ...) | trying it out, or you already keep values in a private repo |
 | 2 | `secrets.existingSecret` | you pre-created one Secret whose keys are the env var names |
 | 3 | `secrets.mappings` | the Secret's key names are not yours to choose (CloudNativePG, External Secrets, Sealed Secrets) |
-| 4 | `server.extraEnv` / `server.extraEnvFrom` | anything else |
+| 4 | `server.extraEnv` | anything else |
 
-Precedence falls out of Kubernetes itself: `env` beats `envFrom`, and a later `envFrom` beats
-an earlier one. Nothing in the chart arbitrates it.
+Precedence falls out of Kubernetes itself, not from anything the chart arbitrates: every `env`
+entry beats every `envFrom` source regardless of order, and among `envFrom` sources a later one
+beats an earlier one. Tiers 1 and 2 are `envFrom`; tiers 3 and 4 are `env`.
+
+`server.extraEnvFrom` is **not** the top of that ladder. It is an `envFrom` source, rendered
+after the chart's own Secret and after `secrets.existingSecret`, so it overrides tiers 1 and 2 -
+and nothing else. Tiers 3 and 4 still win over it, as does every variable the chart renders as a
+plain `env` entry (`BASE_URL`, `POSTGRES_HOST`, `S3_BUCKET`, ...). Use `server.extraEnv` when you
+need the last word.
 
 **Tier 2** - one Secret, keys named after the environment variables:
 

@@ -22,6 +22,13 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
 spec:
   restartPolicy: Never
+  {{- /* This pod runs under the namespace's `default` ServiceAccount, whose token is projected
+       into every container unless it opts out - and unlike the workload pods (which opt out via
+       serviceAccount.automountServiceAccountToken) nothing here has ever declined it. The curl
+       container only makes HTTP calls to the web Service, so hardcode the opt-out rather than
+       reading the value: that value governs the chart's own ServiceAccount, which this pod does
+       not use, and there is no configuration under which these checks need API credentials. */}}
+  automountServiceAccountToken: false
   {{- with .Values.imagePullSecrets }}
   imagePullSecrets: {{- toYaml . | nindent 4 }}
   {{- end }}

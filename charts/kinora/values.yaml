@@ -27,13 +27,19 @@ publicUrl: ''
 # =============================================================================================
 # Secrets
 #
-# Four tiers, in increasing precedence. They fall out of Kubernetes semantics (`env` beats
-# `envFrom`; a later `envFrom` beats an earlier one), so four knobs cover every credential:
+# Four tiers, in increasing precedence. They fall out of Kubernetes semantics - EVERY `env`
+# entry beats EVERY `envFrom` source whatever the order, and a later `envFrom` beats an earlier
+# one - so the chart itself arbitrates nothing:
 #
 #   1. inline values below (auth.secret, postgres.password, ...) -> a chart-managed Secret
 #   2. secrets.existingSecret  -> one Secret, keys named after the env vars, mounted envFrom
-#   3. secrets.mappings        -> per-variable secretKeyRef, for keys you do not control
-#   4. server.extraEnv / server.extraEnvFrom -> raw core/v1, the last word
+#   3. secrets.mappings        -> per-variable secretKeyRef, an `env` entry, so it beats 1 and 2
+#   4. server.extraEnv         -> raw core/v1 EnvVar, appended last, the last word
+#
+# server.extraEnvFrom is deliberately NOT on that ladder. It is an `envFrom` source, rendered
+# after the chart's Secret and after secrets.existingSecret, so it overrides tiers 1 and 2 - and
+# nothing else. Tiers 3 and 4, and every variable the chart renders as a plain `env` entry
+# (BASE_URL, POSTGRES_HOST, ...), outrank it. Reach for server.extraEnv when you need to win.
 #
 # The chart NEVER generates a credential. A generated default is re-rendered on every
 # `helm upgrade`, which would roll AUTH_SECRET (signing out every user) and POSTGRES_PASSWORD
@@ -45,11 +51,13 @@ secrets:
   # names**: AUTH_SECRET, POSTGRES_PASSWORD, OIDC_CLIENT_SECRET, GOOGLE_CLIENT_SECRET,
   # GITHUB_CLIENT_SECRET, SLACK_CLIENT_SECRET, SMTP_PASS, S3_ACCESS_KEY_ID,
   # S3_SECRET_ACCESS_KEY. Mounted with `envFrom`, so any key present here overrides the
-  # matching inline value. One Secret covers every credential.
+  # matching inline value. One Secret covers every credential. Being an `envFrom` source it
+  # cannot override a variable the chart renders as a plain `env` entry, nor `secrets.mappings`.
   existingSecret: ''
   # -- For Secrets whose key names you do not control - CloudNativePG's `password`, External
   # Secrets, Sealed Secrets. Maps an environment variable to a specific Secret key, rendered as
-  # `env[].valueFrom.secretKeyRef`, which outranks both `existingSecret` and the inline values.
+  # `env[].valueFrom.secretKeyRef`, which outranks the inline values, `existingSecret` and
+  # `server.extraEnvFrom` - an `env` entry beats every `envFrom` source.
   # @default -- `{}`
   mappings: {}
   #  POSTGRES_PASSWORD:
@@ -412,13 +420,16 @@ server:
   topologySpreadConstraints: []
   priorityClassName: ''
 
-  # -- Raw `core/v1` EnvVar list, appended last so it overrides every other layer. `valueFrom`
-  # reaches any Secret or ConfigMap key, or the downward API. Use it for anything the chart
-  # does not model.
+  # -- Raw `core/v1` EnvVar list, appended last so it overrides every other layer: it is the
+  # final `env` entry, and an `env` entry beats every `envFrom` source. `valueFrom` reaches any
+  # Secret or ConfigMap key, or the downward API. Use it for anything the chart does not model.
   extraEnv: []
   #  - name: NODE_OPTIONS
   #    value: --max-old-space-size=1536
-  # -- Raw `core/v1` EnvFromSource list - whole ConfigMaps or Secrets.
+  # -- Raw `core/v1` EnvFromSource list - whole ConfigMaps or Secrets. Rendered as the last
+  # `envFrom` source, so it beats the chart's own Secret and `secrets.existingSecret` and
+  # nothing else: it cannot override `secrets.mappings`, `server.extraEnv`, or any variable the
+  # chart renders as a plain `env` entry. Use `server.extraEnv` to override those.
   extraEnvFrom: []
   # -- Extra containers in the server pod. The intended use is a database proxy on 127.0.0.1
   # (cloud-sql-proxy, pgbouncer, stunnel) for a managed database that needs more than

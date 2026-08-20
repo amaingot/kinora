@@ -1,6 +1,14 @@
 {{- range $component := list "server" "web" }}
 {{- $cfg := index $.Values $component }}
 {{- if $cfg.autoscaling.enabled }}
+{{- /* Both targets are nullable, and an HPA whose `metrics:` list renders empty is accepted by
+     the API server but is inert: the controller cannot compute a desired replica count, so it
+     reports "unable to calculate metrics" and the Deployment sits at whatever it was. Failing
+     here turns silently-dead autoscaling into a message at install time. This is the chart's
+     one cross-field guard living outside _validations.tpl, because it is local to this file. */}}
+{{- if not (or $cfg.autoscaling.targetCPUUtilizationPercentage $cfg.autoscaling.targetMemoryUtilizationPercentage) }}
+{{- fail (printf "\nkinora: %s.autoscaling.enabled=true needs at least one utilization target.\n\nWith both %s.autoscaling.targetCPUUtilizationPercentage and .targetMemoryUtilizationPercentage\nunset, the HorizontalPodAutoscaler renders with no metrics. The controller then has nothing to\nscale on and never adjusts the Deployment - autoscaling looks enabled but does nothing.\n\n  --set %s.autoscaling.targetCPUUtilizationPercentage=75\n" $component $component $component) }}
+{{- end }}
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

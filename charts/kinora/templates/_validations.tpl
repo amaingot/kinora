@@ -68,21 +68,39 @@ that cannot see inside their Secret.
 {{- end }}
 {{- end }}
 
-{{- /* Mirrors the zod refine in packages/server/src/lib/env.ts - disabling password auth with no
-     external provider would lock every user out, so the server refuses to boot. */}}
-{{- if .Values.auth.disablePasswordAuth }}
-{{- $hasProvider := or .Values.auth.oidc.issuerUrl .Values.auth.google.clientId .Values.auth.github.clientId }}
-{{- if and (not $hasProvider) (not .Values.secrets.existingSecret) (not .Values.server.extraEnvFrom) }}
-{{- fail "\nkinora: auth.disablePasswordAuth=true requires an external sign-in provider.\n\nConfigure one of auth.oidc (issuerUrl + clientId + clientSecret), auth.google, or\nauth.github. The server enforces this with a zod refine and will not start - failing here\ngives you the message at install time instead of a CrashLoopBackOff.\n" }}
-{{- end }}
-{{- end }}
-
 {{- if .Values.auth.oidc.issuerUrl }}
 {{- if not .Values.auth.oidc.clientId }}
 {{- fail "\nkinora: auth.oidc.issuerUrl is set but auth.oidc.clientId is empty.\n\nresolveOidc() needs issuerUrl + clientId + clientSecret; with any missing, SSO is silently\noff and the sign-in button never appears.\n" }}
 {{- end }}
 {{- if not (include "kinora.hasSecret" (dict "ctx" . "key" "OIDC_CLIENT_SECRET" "inline" .Values.auth.oidc.clientSecret)) }}
 {{- fail "\nkinora: auth.oidc.issuerUrl is set but there is no source for OIDC_CLIENT_SECRET.\n\nSet auth.oidc.clientSecret, or supply it via secrets.existingSecret / secrets.mappings.\n" }}
+{{- end }}
+{{- end }}
+
+{{- /* Mirrors the zod refine in packages/server/src/lib/env.ts - disabling password auth with no
+     external provider would lock every user out, so the server refuses to boot. The refine wants
+     a COMPLETE provider (issuer + id + secret for OIDC, id + secret for the social two), so a
+     lone clientId must not pass here: that install would go green and then CrashLoopBackOff on
+     the very refine this guard exists to pre-empt.
+
+     Every half is resolved with kinora.hasSecret rather than read off .Values, so a provider
+     handed to the server through any credential tier counts - including a complete pair in
+     server.extraEnv, which the chart CAN see (it is a name/value list). secrets.existingSecret
+     and server.extraEnvFrom remain blanket exemptions inside that helper, since the chart cannot
+     look inside a Secret it does not own. */}}
+{{- if .Values.auth.disablePasswordAuth }}
+{{- $oidc := and
+      (include "kinora.hasSecret" (dict "ctx" . "key" "OIDC_ISSUER_URL" "inline" .Values.auth.oidc.issuerUrl))
+      (include "kinora.hasSecret" (dict "ctx" . "key" "OIDC_CLIENT_ID" "inline" .Values.auth.oidc.clientId))
+      (include "kinora.hasSecret" (dict "ctx" . "key" "OIDC_CLIENT_SECRET" "inline" .Values.auth.oidc.clientSecret)) }}
+{{- $google := and
+      (include "kinora.hasSecret" (dict "ctx" . "key" "GOOGLE_CLIENT_ID" "inline" .Values.auth.google.clientId))
+      (include "kinora.hasSecret" (dict "ctx" . "key" "GOOGLE_CLIENT_SECRET" "inline" .Values.auth.google.clientSecret)) }}
+{{- $github := and
+      (include "kinora.hasSecret" (dict "ctx" . "key" "GITHUB_CLIENT_ID" "inline" .Values.auth.github.clientId))
+      (include "kinora.hasSecret" (dict "ctx" . "key" "GITHUB_CLIENT_SECRET" "inline" .Values.auth.github.clientSecret)) }}
+{{- if not (or $oidc $google $github) }}
+{{- fail "\nkinora: auth.disablePasswordAuth=true requires a fully configured external sign-in provider.\n\nHalf a provider is not enough - the server's zod refine wants both halves and will not\nstart, so failing here gives you the message at install time instead of a CrashLoopBackOff.\nConfigure one of:\n\n  auth.oidc    issuerUrl + clientId + clientSecret\n  auth.google  clientId + clientSecret\n  auth.github  clientId + clientSecret\n\nEither half may come from secrets.mappings or server.extraEnv instead of the values above.\n" }}
 {{- end }}
 {{- end }}
 

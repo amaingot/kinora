@@ -6,7 +6,7 @@ kinora tracks pass rates, trends and flaky tests across projects and over time, 
 full Playwright trace inline for any failure. This chart runs the whole thing on your own
 cluster: the API server, the dashboard, and - if you want it - the database.
 
-![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.0](https://img.shields.io/badge/AppVersion-0.2.0-informational?style=flat-square)
+![Version: 0.1.1](https://img.shields.io/badge/Version-0.1.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.0](https://img.shields.io/badge/AppVersion-0.2.0-informational?style=flat-square)
 
 ## TL;DR
 
@@ -85,10 +85,17 @@ increasing precedence:
 | 1 | inline values (`auth.secret`, `postgres.password`, ...) | trying it out, or you already keep values in a private repo |
 | 2 | `secrets.existingSecret` | you pre-created one Secret whose keys are the env var names |
 | 3 | `secrets.mappings` | the Secret's key names are not yours to choose (CloudNativePG, External Secrets, Sealed Secrets) |
-| 4 | `server.extraEnv` / `server.extraEnvFrom` | anything else |
+| 4 | `server.extraEnv` | anything else |
 
-Precedence falls out of Kubernetes itself: `env` beats `envFrom`, and a later `envFrom` beats
-an earlier one. Nothing in the chart arbitrates it.
+Precedence falls out of Kubernetes itself, not from anything the chart arbitrates: every `env`
+entry beats every `envFrom` source regardless of order, and among `envFrom` sources a later one
+beats an earlier one. Tiers 1 and 2 are `envFrom`; tiers 3 and 4 are `env`.
+
+`server.extraEnvFrom` is **not** the top of that ladder. It is an `envFrom` source, rendered
+after the chart's own Secret and after `secrets.existingSecret`, so it overrides tiers 1 and 2 -
+and nothing else. Tiers 3 and 4 still win over it, as does every variable the chart renders as a
+plain `env` entry (`BASE_URL`, `POSTGRES_HOST`, `S3_BUCKET`, ...). Use `server.extraEnv` when you
+need the last word.
 
 **Tier 2** - one Secret, keys named after the environment variables:
 
@@ -367,8 +374,8 @@ A kept PVC means a later re-install has to either delete it first or use
 | retention.artifactDays | int | `0` | Delete stored trace.zip files older than N days but KEEP the runs, so pass rates, trends and flaky history all survive - old runs just lose their "View trace" link. This is the knob to reach for first. 0 = never. |
 | retention.keepLastRuns | int | `0` | Keep only the N newest runs per project, history included. 0 = unlimited. |
 | retention.runDays | int | `0` | Delete whole runs older than N days, history included. 0 = never. |
-| secrets.existingSecret | string | `""` | Name of a Secret you created yourself whose **keys are the literal environment variable names**: AUTH_SECRET, POSTGRES_PASSWORD, OIDC_CLIENT_SECRET, GOOGLE_CLIENT_SECRET, GITHUB_CLIENT_SECRET, SLACK_CLIENT_SECRET, SMTP_PASS, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY. Mounted with `envFrom`, so any key present here overrides the matching inline value. One Secret covers every credential. |
-| secrets.mappings | object | `{}` | For Secrets whose key names you do not control - CloudNativePG's `password`, External Secrets, Sealed Secrets. Maps an environment variable to a specific Secret key, rendered as `env[].valueFrom.secretKeyRef`, which outranks both `existingSecret` and the inline values. |
+| secrets.existingSecret | string | `""` | Name of a Secret you created yourself whose **keys are the literal environment variable names**: AUTH_SECRET, POSTGRES_PASSWORD, OIDC_CLIENT_SECRET, GOOGLE_CLIENT_SECRET, GITHUB_CLIENT_SECRET, SLACK_CLIENT_SECRET, SMTP_PASS, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY. Mounted with `envFrom`, so any key present here overrides the matching inline value. One Secret covers every credential. Being an `envFrom` source it cannot override a variable the chart renders as a plain `env` entry, nor `secrets.mappings`. |
+| secrets.mappings | object | `{}` | For Secrets whose key names you do not control - CloudNativePG's `password`, External Secrets, Sealed Secrets. Maps an environment variable to a specific Secret key, rendered as `env[].valueFrom.secretKeyRef`, which outranks the inline values, `existingSecret` and `server.extraEnvFrom` - an `env` entry beats every `envFrom` source. |
 | sentryDsn | string | `""` | Sentry DSN for server-side error reporting. Empty disables it. |
 | server.affinity | object | `{}` |  |
 | server.args | list | `[]` |  |
@@ -379,8 +386,8 @@ A kept PVC means a later re-install has to either delete it first or use
 | server.autoscaling.targetMemoryUtilizationPercentage | string | `nil` |  |
 | server.command | list | `[]` | Override the container entrypoint. Empty uses the image default. |
 | server.containerPort | int | `3000` | Wired to both `PORT` and the Service `targetPort`, so the two cannot drift. |
-| server.extraEnv | list | `[]` | Raw `core/v1` EnvVar list, appended last so it overrides every other layer. `valueFrom` reaches any Secret or ConfigMap key, or the downward API. Use it for anything the chart does not model. |
-| server.extraEnvFrom | list | `[]` | Raw `core/v1` EnvFromSource list - whole ConfigMaps or Secrets. |
+| server.extraEnv | list | `[]` | Raw `core/v1` EnvVar list, appended last so it overrides every other layer: it is the final `env` entry, and an `env` entry beats every `envFrom` source. `valueFrom` reaches any Secret or ConfigMap key, or the downward API. Use it for anything the chart does not model. |
+| server.extraEnvFrom | list | `[]` | Raw `core/v1` EnvFromSource list - whole ConfigMaps or Secrets. Rendered as the last `envFrom` source, so it beats the chart's own Secret and `secrets.existingSecret` and nothing else: it cannot override `secrets.mappings`, `server.extraEnv`, or any variable the chart renders as a plain `env` entry. Use `server.extraEnv` to override those. |
 | server.extraVolumeMounts | list | `[]` |  |
 | server.extraVolumes | list | `[]` |  |
 | server.image.repository | string | `"ghcr.io/amaingot/kinora-server"` | Change for a private mirror. |
