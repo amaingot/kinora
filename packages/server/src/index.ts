@@ -5,7 +5,7 @@ import process from 'node:process'
 import { app } from './app'
 import { purgeExpiredRuns } from './billing/retention'
 import { db } from './db'
-import { demo, env, retentionPolicy } from './lib/env'
+import { demo, env, retentionPolicy, s3 } from './lib/env'
 import { logger } from './lib/logger'
 
 // Log stray rejections instead of letting one crash the whole server; uncaught exceptions leave the
@@ -19,6 +19,16 @@ process.on('uncaughtException', (err) => {
 const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   logger.info(`${demo ? '[DEMO] ' : ''}kinora server running on port ${info.port}`)
 })
+
+// Which artifact backend won, said once at boot. A misconfigured bucket otherwise only shows up
+// as a failed upload much later, and "static keys vs default credential chain" is the first
+// thing worth knowing when it does.
+logger.info(
+  s3
+    ? { backend: 's3', bucket: s3.bucket, endpoint: s3.endpoint, credentials: s3.accessKey ? 'static' : 'default chain' }
+    : { backend: 'local', dir: env.STORAGE_DIR },
+  'artifact storage',
+)
 
 // Self-host ships no scheduler, so sweep in-process. Cloud leaves retentionPolicy null and
 // keeps sweeping from its own cron (safe with several replicas).

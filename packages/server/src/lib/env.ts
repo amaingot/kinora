@@ -53,8 +53,14 @@ const envSchema = z.object({
   S3_ENDPOINT: z.string().optional(),
   S3_REGION: z.string().optional(),
   S3_BUCKET: z.string().optional(),
+  // Optional: leave both unset to use the AWS SDK's default credential chain (IRSA / EKS Pod
+  // Identity / instance role). Set together or not at all - see the refine below.
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
+  // Path-style URLs (host/bucket/key), which most S3-compatible providers (MinIO, Hetzner)
+  // require. false gives virtual-hosted style (bucket.host/key), which AWS prefers - note that
+  // moves the ORIGIN of presigned artifact URLs, so the dashboard CSP has to follow.
+  S3_FORCE_PATH_STYLE: z.stringbool().default(true),
   SLACK_CLIENT_ID: z.string().optional(),
   SLACK_CLIENT_SECRET: z.string().optional(),
   SMTP_HOST: z.string().optional(),
@@ -82,6 +88,19 @@ const envSchema = z.object({
     || Boolean(e.GOOGLE_CLIENT_ID && e.GOOGLE_CLIENT_SECRET)
     || Boolean(e.GITHUB_CLIENT_ID && e.GITHUB_CLIENT_SECRET),
   { message: 'KINORA_DISABLE_PASSWORD_AUTH=true requires OIDC_* or a social provider to be configured' },
+).refine(
+  // A half-configured bucket used to fall back to local disk in silence, which on Kubernetes
+  // means artifacts written to a container filesystem nobody provisioned. Fail at boot instead.
+  (e) => {
+    const set = [e.S3_ENDPOINT, e.S3_REGION, e.S3_BUCKET].filter(Boolean).length
+    return set === 0 || set === 3
+  },
+  { message: 'S3 artifact storage needs S3_ENDPOINT, S3_REGION and S3_BUCKET together, or none of them' },
+).refine(
+  // Credentials are optional (the default chain covers IRSA and friends), but exactly one of
+  // the pair is always a typo, and the SDK would silently ignore the lone one.
+  e => Boolean(e.S3_ACCESS_KEY_ID) === Boolean(e.S3_SECRET_ACCESS_KEY),
+  { message: 'S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be set together, or both left unset to use the AWS default credential chain (IRSA, EKS Pod Identity, instance role)' },
 )
 
 export type Env = z.infer<typeof envSchema>
@@ -182,11 +201,17 @@ export interface S3Config {
   endpoint: string
   region: string
   bucket: string
-  accessKey: string
-  secretKey: string
+  // Absent means "resolve them yourself": s3Storage() then omits the SDK's `credentials` option
+  // so it falls back to the default provider chain - env vars, shared config, the web identity
+  // token file (IRSA), the container credentials endpoint (EKS Pod Identity), IMDS.
+  accessKey?: string
+  secretKey?: string
+  forcePathStyle: boolean
 }
 
-function resolveS3(): S3Config | null {
+// Exported for the tests; the refines above guarantee the three coordinates are all-or-nothing
+// and that the credential pair is never half-set, so this stays a total function.
+export function resolveS3(): S3Config | null {
   const {
     S3_ENDPOINT: endpoint,
     S3_REGION: region,
@@ -194,9 +219,18 @@ function resolveS3(): S3Config | null {
     S3_ACCESS_KEY_ID: accessKey,
     S3_SECRET_ACCESS_KEY: secretKey,
   } = env
-  if (!endpoint || !region || !bucket || !accessKey || !secretKey)
+  if (!endpoint || !region || !bucket)
     return null
-  return { endpoint, region, bucket, accessKey, secretKey }
+  // `|| undefined` because both .env.example files ship these as empty strings, and an absent
+  // credential is what s3Storage() keys off to omit the SDK's `credentials` option entirely.
+  return {
+    endpoint,
+    region,
+    bucket,
+    accessKey: accessKey || undefined,
+    secretKey: secretKey || undefined,
+    forcePathStyle: env.S3_FORCE_PATH_STYLE,
+  }
 }
 
 export const s3 = resolveS3()
