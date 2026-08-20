@@ -7,10 +7,11 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: () => import('@/pages/LoginPage.vue'), meta: { public: true } },
-    { path: '/signup', name: 'signup', component: () => import('@/pages/SignupPage.vue'), meta: { public: true } },
-    { path: '/forgot-password', name: 'forgot-password', component: () => import('@/pages/ForgotPasswordPage.vue'), meta: { public: true } },
+    // meta.password: these exist only where email+password auth does (see the guard below).
+    { path: '/signup', name: 'signup', component: () => import('@/pages/SignupPage.vue'), meta: { public: true, password: true } },
+    { path: '/forgot-password', name: 'forgot-password', component: () => import('@/pages/ForgotPasswordPage.vue'), meta: { public: true, password: true } },
     // Uses the invite meta: a reset link must open whatever the session state.
-    { path: '/reset-password', name: 'reset-password', component: () => import('@/pages/ResetPasswordPage.vue'), meta: { invite: true } },
+    { path: '/reset-password', name: 'reset-password', component: () => import('@/pages/ResetPasswordPage.vue'), meta: { invite: true, password: true } },
     { path: '/', name: 'overview', component: () => import('@/pages/OverviewPage.vue') },
     // Device authorization approval (desktop / CLI login). Authed; guests bounce to login then back.
     { path: '/device', name: 'device', component: () => import('@/pages/DeviceApprovalPage.vue') },
@@ -77,6 +78,22 @@ export const router = createRouter({
 router.beforeEach(async (to) => {
   await session.ensure()
   const authed = !!session.user.value
+  // SSO-only install: sign-up and the password-reset pages have nothing to do, so send them to
+  // the login page rather than leaving a dead form reachable by direct URL. Checked before the
+  // invite short-circuit because /reset-password rides on meta.invite.
+  if (to.meta.password) {
+    // isLoading settles on success or error; isReady never flips on a failed config fetch.
+    const { state: config, isLoading } = useServerConfig()
+    await until(isLoading).toBe(false)
+    if (config.value?.passwordAuthEnabled === false) {
+      // Keep ?redirect= (the invite page's "Create account" CTA carries the invitation there),
+      // otherwise a first-time SSO user lands on the overview and never accepts the invite.
+      const r = to.query.redirect
+      return typeof r === 'string' && r.startsWith('/')
+        ? { name: 'login', query: { redirect: r } }
+        : { name: 'login' }
+    }
+  }
   // Invite acceptance handles both guest and authed states itself.
   if (to.meta.invite)
     return

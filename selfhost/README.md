@@ -51,12 +51,29 @@ automatically (the `migrate` service) before the server starts.
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | yes      | Database credentials.                                                      |
 | `SMTP_*`                                              | no       | Enables email verification, password reset, invitations, and email alerts. |
 | `GOOGLE_*` / `GITHUB_*`                               | no       | Social login. Leave empty for email + password only.                       |
+| `OIDC_*`                                              | no       | SSO via any OIDC provider (Okta, Keycloak, Entra ID, ...). See below.      |
+| `KINORA_DISABLE_PASSWORD_AUTH`                        | no       | `true` = SSO-only: no email + password sign-in or sign-up.                 |
 | `S3_*`                                                | no       | Use an S3-compatible store instead of the local volume.                    |
 | `KINORA_ARTIFACT_RETENTION_DAYS`                      | no       | Delete stored trace files older than N days, keep the runs. `0` = never.   |
 | `KINORA_RETENTION_DAYS`                               | no       | Delete runs older than N days. `0` = never.                                |
 | `KINORA_KEEP_LAST_RUNS`                               | no       | Keep only the N newest runs per project. `0` = unlimited.                  |
 
 Self-host runs with `KINORA_CLOUD=false` (no billing; every feature, including alerts, is unlimited).
+
+### Single sign-on (OIDC)
+
+Set `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` to sign in with your own identity
+provider. Register this redirect URL with the IdP:
+
+```
+${PUBLIC_URL}/api/auth/oauth2/callback/oidc
+```
+
+Users are provisioned just-in-time on first sign-in, each with their own workspace; an email that
+already has a kinora account links to it instead of duplicating. Set
+`KINORA_DISABLE_PASSWORD_AUTH=true` to require SSO - the server refuses to boot if no provider is
+configured, so a typo can't lock everyone out. Full details in
+[Configuration](https://kinora.dev/self-hosting/configuration/).
 
 ## Retention
 

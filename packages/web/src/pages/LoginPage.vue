@@ -5,11 +5,12 @@ import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@kinor
 import { Input } from '@kinora/ui/input'
 import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { z } from 'zod'
 import AuthLayout from '@/components/auth/AuthLayout.vue'
 import SocialButtons from '@/components/auth/SocialButtons.vue'
+import { useServerConfig } from '@/composables/queries'
 import { authClient } from '@/lib/auth'
 import { session } from '@/lib/session'
 
@@ -17,6 +18,24 @@ const router = useRouter()
 const route = useRoute()
 const serverError = ref('')
 const lastMethod = authClient.getLastUsedLoginMethod()
+
+// SSO-only install: hide the credentials form and the (now unreachable) sign-up link.
+const { state: serverConfig } = useServerConfig()
+const passwordEnabled = computed(() => serverConfig.value?.passwordAuthEnabled ?? true)
+
+// A failed OAuth/OIDC callback redirects here with ?error=; surface it rather than silently
+// showing a bare login page. Rendered outside the form so it's visible on SSO-only installs too.
+const OAUTH_ERRORS: Record<string, string> = {
+  access_denied: 'Sign-in was cancelled.',
+  email_is_missing: 'Your identity provider did not return an email address.',
+  account_not_linked: 'That email already belongs to an account signed up a different way.',
+}
+const callbackError = computed(() => {
+  const e = route.query.error
+  if (typeof e !== 'string' || !e)
+    return ''
+  return OAUTH_ERRORS[e] ?? `Sign-in failed (${e.replace(/_/g, ' ')}).`
+})
 
 // Honor ?redirect= (e.g. an invite link); internal paths only.
 function destination(): string | { name: string } {
@@ -54,9 +73,13 @@ const labelClass = 'font-mono text-[11px] tracking-wider text-muted-foreground u
 
 <template>
   <AuthLayout tag="Sign in to continue">
+    <p v-if="callbackError" class="mb-4 rounded-md border border-fail/30 bg-fail/10 px-3 py-2 text-xs text-fail">
+      {{ callbackError }}
+    </p>
+
     <SocialButtons />
 
-    <form class="space-y-4" @submit="onSubmit">
+    <form v-if="passwordEnabled" class="space-y-4" @submit="onSubmit">
       <FormField v-slot="{ componentField }" name="email">
         <FormItem>
           <FormLabel :class="labelClass">
@@ -101,10 +124,12 @@ const labelClass = 'font-mono text-[11px] tracking-wider text-muted-foreground u
     </form>
 
     <template #footer>
-      No account?
-      <RouterLink :to="{ name: 'signup' }" class="font-medium text-foreground underline-offset-4 hover:underline">
-        Create one
-      </RouterLink>
+      <template v-if="passwordEnabled">
+        No account?
+        <RouterLink :to="{ name: 'signup' }" class="font-medium text-foreground underline-offset-4 hover:underline">
+          Create one
+        </RouterLink>
+      </template>
     </template>
   </AuthLayout>
 </template>

@@ -60,6 +60,44 @@ password only.
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth. |
 
+## Single sign-on (OIDC, optional)
+
+Point kinora at any OpenID Connect provider - Okta, Keycloak, Entra ID, Authentik, Auth0,
+Google Workspace. Enabled once `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` are
+all set; the dashboard then shows a **Continue with &lt;name&gt;** button as the first sign-in option.
+
+Register this redirect URL with your IdP:
+
+```
+${BASE_URL}/api/auth/oauth2/callback/oidc
+```
+
+Users are provisioned **just-in-time**: a first sign-in creates the account and its personal
+workspace. If the email already belongs to a kinora account, the SSO identity is linked to it
+instead of creating a duplicate, so existing users can move onto SSO without losing their
+projects.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `OIDC_ISSUER_URL` | - | Issuer URL, e.g. `https://sso.example.com/realms/acme`. Empty disables SSO. |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | - | Credentials for a **confidential** client. |
+| `OIDC_PROVIDER_NAME` | `SSO` | Button label: "Continue with ...". |
+| `OIDC_SCOPES` | `openid profile email` | Space- or comma-separated. Sign-in fails if the IdP returns no `email` or `sub`, so don't narrow these without reason. A `name` claim is optional - kinora falls back to `preferred_username`, `given_name`, or the email local part. |
+| `OIDC_DISCOVERY_URL` | *(derived)* | Only if the document isn't at `<issuer>/.well-known/openid-configuration`. |
+| `OIDC_PKCE` | `true` | Turn off only for an IdP that can't do PKCE. |
+| `KINORA_DISABLE_PASSWORD_AUTH` | `false` | `true` turns off email + password sign-in and sign-up entirely. |
+
+`KINORA_DISABLE_PASSWORD_AUTH=true` requires `OIDC_*` or a social provider to be configured - the
+server refuses to boot otherwise, so a typo can't lock every user out. In that mode the sign-up
+and password-reset pages redirect to the login page, and an invited teammate must sign in through
+the IdP before they can accept the invitation.
+
+**Troubleshooting.** A wrong `OIDC_ISSUER_URL` surfaces as a generic `400` on sign-in; the real
+cause (a failed discovery fetch) is in the server log. A sign-in that bounces back with
+`email_is_missing` means the IdP isn't releasing an `email` claim - fix the scope or claim mapping
+on the IdP side. A missing `name` claim is fine: kinora derives a display name from
+`preferred_username`, `given_name`, or the email local part.
+
 ## Email (SMTP, optional)
 
 `SMTP_HOST`, `SMTP_PORT`, and `SMTP_FROM` together enable email (verification, password reset,

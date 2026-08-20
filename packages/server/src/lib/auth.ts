@@ -2,19 +2,27 @@ import { randomUUID } from 'node:crypto'
 import { apiKey } from '@better-auth/api-key'
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
-import { admin, bearer, deviceAuthorization, lastLoginMethod, organization } from 'better-auth/plugins'
+import { admin, bearer, deviceAuthorization, genericOAuth, lastLoginMethod, organization } from 'better-auth/plugins'
 import { and, eq } from 'drizzle-orm'
 import { polarAuthPlugin, polarClient } from '../billing/polar'
 import { db } from '../db'
 import { member, organization as organizationTable } from '../db/schemas/index'
 import { purgeUserOwnedData } from './account'
-import { demo, env, githubOauthEnabled, googleOauthEnabled } from './env'
+import { demo, env, githubOauthEnabled, googleOauthEnabled, oidc, OIDC_PROVIDER_ID, passwordAuthEnabled } from './env'
 import { logger } from './logger'
 import { mailerEnabled, sendMail } from './mailer'
 import { getTrustedOrigins } from './utils'
 
 function slugify(input: string): string {
   return input.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'team'
+}
+
+async function sendResetPassword({ user, url }: { user: { email: string, name?: string | null }, url: string }): Promise<void> {
+  sendMail({
+    to: user.email,
+    subject: 'Reset your kinora password',
+    text: `Hi${user.name ? ` ${user.name}` : ''},\n\nSomeone requested a password reset for your kinora account. Click the link below to choose a new password:\n\n${url}\n\nThe link expires in 1 hour. If you didn't ask for this, you can safely ignore this email.`,
+  })
 }
 
 const polarPlugin = polarAuthPlugin()
@@ -24,14 +32,11 @@ export const auth = betterAuth({
   baseURL: env.BASE_URL,
   trustedOrigins: getTrustedOrigins(),
   emailAndPassword: {
-    enabled: true,
-    sendResetPassword: async ({ user, url }) => {
-      sendMail({
-        to: user.email,
-        subject: 'Reset your kinora password',
-        text: `Hi${user.name ? ` ${user.name}` : ''},\n\nSomeone requested a password reset for your kinora account. Click the link below to choose a new password:\n\n${url}\n\nThe link expires in 1 hour. If you didn't ask for this, you can safely ignore this email.`,
-      })
-    },
+    enabled: passwordAuthEnabled,
+    // better-auth gates /forget-password on this callback existing, never on `enabled`, and
+    // /reset-password isn't gated at all (it would create a credential account). Omitting the
+    // callback is what actually closes the password-reset path on an SSO-only install.
+    ...(passwordAuthEnabled ? { sendResetPassword } : {}),
   },
   emailVerification: {
     sendOnSignUp: mailerEnabled,
@@ -46,6 +51,18 @@ export const auth = betterAuth({
   socialProviders: {
     ...(googleOauthEnabled ? { google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET } } : {}),
     ...(githubOauthEnabled ? { github: { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET } } : {}),
+  },
+  account: {
+    accountLinking: {
+      enabled: true,
+      // Trust the corporate IdP: an OIDC identity lands in the existing kinora account with the
+      // same email, so self-hosters move existing users onto SSO without losing their projects.
+      trustedProviders: oidc ? [OIDC_PROVIDER_ID] : [],
+      // Independent of trustedProviders: without this, every user on a no-SMTP self-host (where
+      // emailVerified is never set) fails to link. Only relaxed when OIDC is actually configured.
+      // TODO(better-auth): deprecated, removed in the next minor - the gate becomes unconditional.
+      ...(oidc ? { requireLocalEmailVerified: false } : {}),
+    },
   },
   user: {
     deleteUser: {
@@ -118,6 +135,12 @@ export const auth = betterAuth({
       },
     },
   },
+  // A provider error (user cancels at the IdP, or no `code` comes back) is handled before
+  // better-auth parses the state, so the client's errorCallbackURL can't reach it. Without this
+  // the user lands on the bare /api/auth/error backend page; send them to the dashboard instead.
+  onAPIError: {
+    errorURL: `${env.WEB_ORIGIN}/login`,
+  },
   advanced: {
     ...(env.COOKIE_DOMAIN ? { crossSubDomainCookies: { enabled: true, domain: env.COOKIE_DOMAIN } } : {}),
     // Demo runs on a *.kinora.dev subdomain next to prod; a distinct cookie name stops prod's
@@ -146,6 +169,27 @@ export const auth = betterAuth({
       },
     }),
     admin(),
+    ...(oidc
+      ? [genericOAuth({
+          config: [{
+            providerId: OIDC_PROVIDER_ID,
+            discoveryUrl: oidc.discoveryUrl,
+            issuer: oidc.issuerUrl,
+            clientId: oidc.clientId,
+            clientSecret: oidc.clientSecret,
+            scopes: oidc.scopes,
+            pkce: oidc.pkce,
+            // The callback hard-fails with "name_is_missing" when the IdP returns no `name`
+            // claim, which plenty of Keycloak/Authentik setups don't. Fall back, don't reject.
+            mapProfileToUser: (profile: Record<string, unknown>) => ({
+              name: String(
+                profile.name || profile.preferred_username || profile.given_name
+                || String(profile.email ?? '').split('@')[0],
+              ),
+            }),
+          }],
+        })]
+      : []),
     ...(polarPlugin ? [polarPlugin] : []),
   ],
 })
