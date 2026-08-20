@@ -6,8 +6,9 @@ description: Every environment variable the kinora server reads, with defaults a
 
 This is the full reference for the **server process** environment. If you run the self-host Docker
 Compose bundle, you configure a friendlier subset (`PUBLIC_URL`, `WEB_PORT`, ...) that maps onto
-these internally - see [Configuration](/self-hosting/configuration/). Run the server directly and
-these are the variables it reads.
+these internally - see [Configuration](/self-hosting/configuration/). The
+[Helm chart](/self-hosting/kubernetes/) exposes the same set as chart values. Run the server
+directly and these are the variables it reads.
 
 Config is validated at startup (zod); a missing required variable, or `KINORA_CLOUD=true` without
 its Polar variables, stops the server from booting.

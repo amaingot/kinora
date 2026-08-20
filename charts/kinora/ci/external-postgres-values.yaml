@@ -1,0 +1,14 @@
+# Managed database: no bundled Postgres, TLS via PGSSLMODE.
+publicUrl: https://kinora.example.com
+auth:
+  secret: test-auth-secret-not-a-real-one
+postgres:
+  enabled: false
+  host: kinora.abc123.us-east-1.rds.amazonaws.com
+  port: 5432
+  username: kinora
+  database: kinora
+  password: test-postgres-password
+  # RDS and Cloud SQL use CAs that are not in Node's default bundle, and node-postgres does not
+  # read PGSSLROOTCERT.
+  sslMode: no-verify

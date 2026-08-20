@@ -31,6 +31,7 @@ export const NAV: NavGroup[] = [
     label: 'Self-hosting',
     items: [
       { label: 'Overview', slug: 'self-hosting' },
+      { label: 'Kubernetes (Helm)', slug: 'self-hosting/kubernetes' },
       { label: 'Configuration', slug: 'self-hosting/configuration' },
       { label: 'Storage & artifacts', slug: 'self-hosting/storage' },
       { label: 'Upgrading & backups', slug: 'self-hosting/upgrading' },

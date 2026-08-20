@@ -14,6 +14,10 @@ export default antfu(
       'packages/trace-viewer/src/sw/**',
       'packages/trace-viewer/src/sw-main.ts',
       'packages/trace-viewer/public/sw.bundle.js',
+      // Helm templates are Go templates, not YAML - the yaml plugin cannot parse them.
+      // values.yaml and ci/*.yaml stay linted: those are real YAML.
+      'charts/**/templates/**',
+      'charts/**/*.tpl',
     ],
   },
   {

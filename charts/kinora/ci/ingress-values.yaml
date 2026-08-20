@@ -1,0 +1,15 @@
+# Ingress with TLS from cert-manager, plus a second hostname.
+publicUrl: https://kinora.example.com
+auth:
+  secret: test-auth-secret-not-a-real-one
+postgres:
+  password: test-postgres-password
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  extraHosts:
+    - host: kinora-legacy.example.com
+  tls:
+    enabled: true

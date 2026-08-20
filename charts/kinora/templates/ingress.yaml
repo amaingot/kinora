@@ -1,0 +1,63 @@
+{{- if .Values.ingress.enabled }}
+{{- $fullName := include "kinora.fullname" . }}
+{{- $backend := include "kinora.web.fullname" . }}
+{{- $port := .Values.web.service.port }}
+{{- $host := include "kinora.publicHost" . }}
+{{- /* Defaults derived from web.nginx.* so the two body-size limits cannot drift apart: an
+     ingress-nginx controller defaults to 1m and would 413 every trace upload long before
+     nginx inside the pod saw it. Unknown annotations are ignored by other controllers.
+     User annotations win - merge takes the destination's keys first. */}}
+{{- $annotations := merge (deepCopy .Values.ingress.annotations) (dict
+      "nginx.ingress.kubernetes.io/proxy-body-size" .Values.web.nginx.clientMaxBodySize
+      "nginx.ingress.kubernetes.io/proxy-read-timeout" (.Values.web.nginx.proxyReadTimeout | trimSuffix "s")
+    ) .Values.commonAnnotations }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  labels: {{- include "kinora.labels" . | nindent 4 }}
+  annotations: {{- toYaml $annotations | nindent 4 }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        {{- if .Values.ingress.tls.hosts }}
+        {{- toYaml .Values.ingress.tls.hosts | nindent 8 }}
+        {{- else }}
+        - {{ $host | quote }}
+        {{- range .Values.ingress.extraHosts }}
+        - {{ .host | quote }}
+        {{- end }}
+        {{- end }}
+      secretName: {{ .Values.ingress.tls.secretName | default (printf "%s-tls" $fullName) }}
+  {{- end }}
+  rules:
+    {{- /* One rule, one backend. Everything goes to the web Service: nginx inside that pod
+         does the /api, /trpc, /artifacts split. Splitting paths across backends here would
+         break the single-origin contract the SPA's CSP and session cookie depend on. */}}
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.path }}
+            pathType: {{ .Values.ingress.pathType }}
+            backend:
+              service:
+                name: {{ $backend }}
+                port:
+                  number: {{ $port }}
+    {{- range .Values.ingress.extraHosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          - path: {{ .path | default "/" }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ $backend }}
+                port:
+                  number: {{ $port }}
+    {{- end }}
+{{- end }}

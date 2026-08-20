@@ -1,0 +1,19 @@
+{{- range $component := list "server" "web" }}
+{{- $cfg := index $.Values $component }}
+{{- if $cfg.pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include (printf "kinora.%s.fullname" $component) $ }}
+  labels: {{- include "kinora.componentLabels" (dict "ctx" $ "component" $component) | nindent 4 }}
+spec:
+  {{- if $cfg.pdb.maxUnavailable }}
+  maxUnavailable: {{ $cfg.pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ $cfg.pdb.minAvailable }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "kinora.selectorLabels" (dict "ctx" $ "component" $component) | nindent 6 }}
+{{- end }}
+{{- end }}

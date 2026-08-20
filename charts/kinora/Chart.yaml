@@ -1,0 +1,47 @@
+apiVersion: v2
+name: kinora
+description: Self-hosted kinora - a dashboard for Playwright test reports across projects and over time, with an embedded trace viewer.
+type: application
+
+# The chart's own version. Bump it in EVERY PR that touches charts/** - GHCR OCI tags are
+# immutable, so main cannot re-publish a version that already exists.
+version: 0.1.0
+
+# The kinora release these images/templates were tested against. Backs `image.tag` when that
+# value is empty, so `helm install` with no overrides pulls a pinned, reproducible pair of
+# images rather than a moving `latest`.
+# Quoted, and it must stay quoted: a two-segment version like 1.0 parses as the float 1.0 and
+# renders an image tag of ":1", which silently pulls the wrong image.
+# eslint-disable-next-line yaml/plain-scalar, yaml/quotes
+appVersion: "0.2.0"
+
+kubeVersion: '>=1.28.0-0'
+
+home: https://kinora.dev
+icon: https://kinora.dev/favicon.svg
+sources:
+  - https://github.com/amaingot/kinora
+keywords:
+  - playwright
+  - testing
+  - test-reports
+  - trace-viewer
+  - dashboard
+
+maintainers:
+  - name: amaingot
+    url: https://github.com/amaingot
+
+# helm push copies these into the OCI manifest; org.opencontainers.image.source is what links
+# the published package to the repository on GHCR.
+annotations:
+  org.opencontainers.image.source: https://github.com/amaingot/kinora
+  org.opencontainers.image.documentation: https://docs.kinora.dev/self-hosting/kubernetes/
+  org.opencontainers.image.licenses: FSL-1.1-MIT
+  org.opencontainers.image.title: kinora
+  artifacthub.io/license: FSL-1.1-MIT
+  artifacthub.io/links: |
+    - name: source
+      url: https://github.com/amaingot/kinora
+    - name: documentation
+      url: https://docs.kinora.dev/self-hosting/kubernetes/

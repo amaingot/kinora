@@ -1,0 +1,70 @@
+kinora {{ .Chart.AppVersion }} is installing as release "{{ .Release.Name }}" in namespace {{ .Release.Namespace }}.
+
+  URL:  {{ include "kinora.publicUrl" . }}
+
+Watch it come up (the server waits on a migration init container, which waits on the database):
+
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "kinora.server.fullname" . }}
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }} --logs
+
+{{- if not (or .Values.ingress.enabled .Values.httpRoute.enabled) }}
+
+No Ingress or HTTPRoute was created, so nothing routes to kinora from outside the cluster yet.
+Either set `ingress.enabled=true` (or `httpRoute.enabled=true`), point your own load balancer at
+the {{ include "kinora.web.fullname" . }} Service, or try it locally:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kinora.web.fullname" . }} 8080:{{ .Values.web.service.port }}
+
+  ...with `--set publicUrl=http://localhost:8080`, since publicUrl must be the URL your browser
+  actually uses.
+{{- end }}
+{{- if hasPrefix "http://" .Values.publicUrl }}
+
+! publicUrl is http://, not https://. Session cookies and the trace viewer's service worker
+  both behave differently over plaintext - fine for a port-forward or a local trial, not for a
+  real deployment.
+{{- end }}
+{{- if and .Values.ingress.enabled .Values.httpRoute.enabled }}
+
+! Both ingress.enabled and httpRoute.enabled are set. That is legal - it is how an
+  Ingress -> Gateway API migration looks - but it is usually a mistake.
+{{- end }}
+
+Send your first run:
+
+  npx @kinora/cli upload --url {{ include "kinora.publicUrl" . }} --token <api-token>
+
+  Sign in, create a project, and copy its API token from the dashboard. Then point your
+  Playwright reporter at the same URL.
+{{- if .Values.auth.oidc.issuerUrl }}
+
+SSO is configured against {{ .Values.auth.oidc.issuerUrl }}. Register this redirect URI with
+your identity provider - the trailing path segment is fixed and not configurable:
+
+  {{ include "kinora.publicUrl" . }}/api/auth/oauth2/callback/oidc
+{{- end }}
+{{- if not (or .Values.retention.artifactDays .Values.retention.runDays .Values.retention.keepLastRuns) }}
+
+! Retention is off, so this instance keeps every run and every trace forever. Traces are what
+  fill the disk. A good starting point, which preserves all your history and trends and only
+  drops the trace files behind older runs:
+
+    --set retention.artifactDays=30
+{{- end }}
+{{- if include "kinora.localStorage.enabled" . }}
+
+Artifacts are on a {{ .Values.storage.local.size }} PersistentVolumeClaim
+({{ include "kinora.artifactsClaimName" . }}). It is ReadWriteOnce, which is why the server runs
+a single replica - configure `storage.s3` to scale out.
+{{- end }}
+{{- if .Values.postgres.enabled }}
+
+The bundled Postgres has no replication, no backups and no connection pooler. For anything you
+care about, set `postgres.enabled=false` and point `postgres.host` at a managed database.
+Back it up with:
+
+  kubectl -n {{ .Release.Namespace }} exec sts/{{ include "kinora.postgres.fullname" . }} -- \
+    pg_dump -U {{ .Values.postgres.username }} {{ .Values.postgres.database }} > kinora-backup.sql
+{{- end }}
+
+Docs: https://docs.kinora.dev/self-hosting/kubernetes/

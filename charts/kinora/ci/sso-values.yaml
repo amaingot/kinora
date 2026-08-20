@@ -1,0 +1,32 @@
+# SSO-only install with e-mail and the Slack OAuth app configured.
+publicUrl: https://kinora.example.com
+auth:
+  secret: test-auth-secret-not-a-real-one
+  disablePasswordAuth: true
+  oidc:
+    issuerUrl: https://id.example.com/realms/main
+    clientId: kinora
+    clientSecret: test-oidc-client-secret
+    providerName: Example ID
+    scopes: openid profile email groups
+  google:
+    clientId: google-client-id
+    clientSecret: test-google-client-secret
+  github:
+    clientId: github-client-id
+    clientSecret: test-github-client-secret
+postgres:
+  password: test-postgres-password
+smtp:
+  host: smtp.example.com
+  port: 587
+  user: kinora
+  password: test-smtp-password
+  from: kinora <no-reply@example.com>
+slack:
+  clientId: slack-client-id
+  clientSecret: test-slack-client-secret
+retention:
+  artifactDays: 30
+  runDays: 180
+  keepLastRuns: 500

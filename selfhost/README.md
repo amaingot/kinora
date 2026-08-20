@@ -3,6 +3,9 @@
 Run the whole stack (Postgres + server + dashboard) with one `docker compose`, on a single
 origin, with trace artifacts on a local volume.
 
+> Running Kubernetes? Use the Helm chart in [`charts/kinora`](../charts/kinora) instead - same
+> stack, same single-origin topology, every setting exposed as a chart value.
+
 ## Quickstart
 
 From this `selfhost/` directory:

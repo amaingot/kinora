@@ -1,0 +1,206 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kinora.server.fullname" . }}
+  labels: {{- include "kinora.componentLabels" (dict "ctx" . "component" "server") | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if not .Values.server.autoscaling.enabled }}
+  replicas: {{ .Values.server.replicaCount }}
+  {{- end }}
+  {{- if include "kinora.localStorage.enabled" . }}
+  {{- /* The artifact PVC is ReadWriteOnce, so a RollingUpdate deadlocks: the new pod stays
+       Pending on a volume the old pod still holds, and the old pod never terminates because
+       the rollout is waiting on the new one. */}}
+  strategy:
+    type: Recreate
+  {{- else }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  {{- end }}
+  selector:
+    matchLabels: {{- include "kinora.selectorLabels" (dict "ctx" . "component" "server") | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- /* Secrets and the nginx config are mounted by reference, so without these a
+             config-only `helm upgrade` would change nothing observable and leave the old
+             values running. */}}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.server.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "kinora.componentLabels" (dict "ctx" . "component" "server") | nindent 8 }}
+        {{- with .Values.server.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "kinora.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.podSecurityContext }}
+      securityContext: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.server.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.topologySpreadConstraints }}
+      topologySpreadConstraints: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- /* The server closes its HTTP listener and drains the pg pool on SIGTERM, hard-exiting
+           after 10s. */}}
+      terminationGracePeriodSeconds: {{ .Values.server.terminationGracePeriodSeconds }}
+      {{- if or .Values.server.migrations.enabled .Values.server.initContainers }}
+      initContainers:
+        {{- with .Values.server.initContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.server.migrations.enabled }}
+        {{- /*
+          Migrations run as an init container, NOT a Helm hook. Both hook phases are wrong here:
+            - pre-install runs before the bundled Postgres StatefulSet exists, so it has nothing
+              to connect to and burns its whole backoff budget failing;
+            - post-install runs after the server is already up against an unmigrated schema.
+          An init container is ordered correctly by construction, and `migrate latest` is
+          idempotent.
+
+          The retry loop lives inside the container rather than leaning on the pod's restart
+          backoff, which is exponential and capped at 5 minutes (attempts land at roughly
+          0/10/30/70/150/310s). On a cold install - node being provisioned, volume attaching,
+          initdb running - Postgres often becomes ready just after an attempt, and the next one
+          then lands minutes later, inside a `helm install --atomic --timeout` window that would
+          roll the whole release back. A flat retry is predictable and fails loudly.
+        */}}
+        - name: migrate
+          image: {{ include "kinora.server.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-euc"]
+          args:
+            - |
+              attempts={{ .Values.server.migrations.attempts }}
+              delay={{ .Values.server.migrations.retryDelaySeconds }}
+              i=1
+              while [ "$i" -le "$attempts" ]; do
+                echo "kinora: migration attempt $i/$attempts"
+                if node dist/scripts/migrate.mjs latest; then
+                  echo "kinora: migrations applied"
+                  exit 0
+                fi
+                echo "kinora: attempt $i failed; retrying in ${delay}s" >&2
+                i=$((i + 1))
+                sleep "$delay"
+              done
+              echo "kinora: migrations still failing after $attempts attempts" >&2
+              exit 1
+          {{- /* scripts/migrate.ts imports src/lib/env.ts, which validates the ENTIRE zod schema -
+               BASE_URL, AUTH_SECRET, the disable-password-auth refine - not just the POSTGRES_*
+               vars it reads. The env block must be identical to the server's, which is why both
+               use the same helper. */}}
+          env: {{- include "kinora.serverEnv" . | trim | nindent 12 }}
+          {{- with (include "kinora.serverEnvFrom" . | trim) }}
+          envFrom: {{- . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.server.securityContext }}
+          securityContext: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources: {{- toYaml (.Values.server.migrations.resources | default .Values.server.resources) | nindent 12 }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: server
+          image: {{ include "kinora.server.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- /* The image has no ENTRYPOINT and its CMD is already correct, so command/args stay
+               empty unless someone deliberately overrides them. */}}
+          {{- with .Values.server.command }}
+          command: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.server.args }}
+          args: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.server.containerPort }}
+              protocol: TCP
+          env: {{- include "kinora.serverEnv" . | trim | nindent 12 }}
+          {{- with (include "kinora.serverEnvFrom" . | trim) }}
+          envFrom: {{- . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.server.startupProbe.enabled }}
+          startupProbe:
+            httpGet:
+              path: /healthcheck
+              port: http
+            periodSeconds: {{ .Values.server.startupProbe.periodSeconds }}
+            failureThreshold: {{ .Values.server.startupProbe.failureThreshold }}
+          {{- end }}
+          {{- if .Values.server.readinessProbe.enabled }}
+          readinessProbe:
+            {{- /* /healthcheck runs `SELECT 1`, so it 503s while Postgres is unreachable - which
+                 is exactly right for readiness: stop routing traffic here. */}}
+            httpGet:
+              path: /healthcheck
+              port: http
+            initialDelaySeconds: {{ .Values.server.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.server.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.server.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.server.readinessProbe.failureThreshold }}
+          {{- end }}
+          {{- if .Values.server.livenessProbe.enabled }}
+          livenessProbe:
+            {{- /* Deliberately a TCP check and not /healthcheck: that endpoint depends on the
+                 database, so an httpGet liveness probe would restart every server pod during a
+                 Postgres blip - for a fault a restart cannot fix. Readiness already removes the
+                 pod from the Service. */}}
+            tcpSocket:
+              port: http
+            initialDelaySeconds: {{ .Values.server.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.server.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.server.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.server.livenessProbe.failureThreshold }}
+          {{- end }}
+          {{- with .Values.server.securityContext }}
+          securityContext: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources: {{- toYaml .Values.server.resources | nindent 12 }}
+          {{- if or (include "kinora.localStorage.enabled" .) .Values.server.extraVolumeMounts }}
+          volumeMounts:
+            {{- if include "kinora.localStorage.enabled" . }}
+            - name: artifacts
+              mountPath: {{ .Values.storage.local.path }}
+            {{- end }}
+            {{- with .Values.server.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+        {{- with .Values.server.sidecars }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- if or (include "kinora.localStorage.enabled" .) .Values.server.extraVolumes }}
+      volumes:
+        {{- if include "kinora.localStorage.enabled" . }}
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: {{ include "kinora.artifactsClaimName" . }}
+        {{- end }}
+        {{- with .Values.server.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}

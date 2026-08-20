@@ -171,7 +171,10 @@ Open http://localhost:5173 and sign in with the seeded credentials (`demo@kinora
 
 ## Self-hosting
 
-Run the whole stack with one `docker compose` (Postgres + server + dashboard, single origin, local-FS artifacts, no S3), from the images published to GHCR on every `main` commit. See [`selfhost/README.md`](selfhost/README.md) for the quickstart, configuration, sending tests, custom domains, upgrades, and backups.
+Run the whole stack yourself (Postgres + server + dashboard, single origin), from the images published to GHCR on every `main` commit. Two supported ways:
+
+- **Docker Compose**, on a single box: [`selfhost/README.md`](selfhost/README.md) covers the quickstart, configuration, sending tests, custom domains, upgrades, and backups.
+- **Kubernetes**, with the Helm chart in [`charts/kinora`](charts/kinora) - published to GHCR as an OCI artifact, with optional bundled Postgres and every self-host setting exposed as a chart value.
 
 ## Licensing
 

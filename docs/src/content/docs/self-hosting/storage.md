@@ -15,6 +15,14 @@ keeps everything on your box.
 
 Back it up like any Docker volume - see [Upgrading & backups](/self-hosting/upgrading/).
 
+### On Kubernetes
+
+The [Helm chart](/self-hosting/kubernetes/) uses a PersistentVolumeClaim instead of a named
+volume, configured under `storage.local` (`size`, `storageClass`, or `existingClaim` to bring
+your own). It is `ReadWriteOnce` by default, which is why the chart pins the server to a single
+replica: `/artifacts` is served from local disk by whichever replica the Service picks. Configure
+S3, or a `ReadWriteMany` volume, before scaling out.
+
 ## S3-compatible store
 
 Set **all five** `S3_*` variables to store artifacts in any S3-compatible object store instead

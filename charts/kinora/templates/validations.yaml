@@ -1,0 +1,6 @@
+{{- /*
+This template renders nothing. Its only job is to execute the validation guards on every
+render - including `helm lint` and `helm template`, which never instantiate a workload.
+Helm skips manifests that produce no content, so nothing reaches the cluster.
+*/}}
+{{- include "kinora.validateValues" . -}}

@@ -1,0 +1,103 @@
+{{- if .Values.tests.enabled }}
+{{- /*
+Everything here goes through the web Service, because the reverse proxy is the thing under
+test. The chart's signature failure mode is an nginx config that never gets mounted: the pod
+starts, `helm install --wait` goes green, `/` serves the dashboard - and every API call 404s,
+because the published web image's own config has no /api/ location at all.
+
+Every assertion is a read, so this is safe to run against a production release.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "kinora.fullname" . }}-test
+  labels: {{- include "kinora.componentLabels" (dict "ctx" . "component" "test") | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    {{- /* succeeded-only deletion: a failed run leaves the pod behind for `kubectl logs`. */}}
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  containers:
+    - name: test
+      image: "{{ .Values.tests.image.repository }}:{{ .Values.tests.image.tag }}"
+      imagePullPolicy: {{ .Values.tests.image.pullPolicy | default .Values.image.pullPolicy }}
+      command: ["/bin/sh", "-eu"]
+      args:
+        - -c
+        - |
+          base="http://{{ include "kinora.web.fullname" . }}:{{ .Values.web.service.port }}"
+          failures=0
+
+          # $1 label  $2 path  $3 expected status  $4 optional substring the body must contain
+          check() {
+            code=$(curl -sS -o /tmp/body -w '%{http_code}' --max-time 20 "$base$2" || echo 000)
+            if [ "$code" != "$3" ]; then
+              echo "FAIL  $1: GET $2 -> $code (want $3)"
+              head -c 400 /tmp/body; echo
+              failures=$((failures + 1))
+              return
+            fi
+            if [ -n "${4:-}" ] && ! grep -q "$4" /tmp/body; then
+              echo "FAIL  $1: GET $2 -> $3 but body is missing '$4'"
+              head -c 400 /tmp/body; echo
+              failures=$((failures + 1))
+              return
+            fi
+            echo "ok    $1"
+          }
+
+          # The single highest-value assertion. Transitively proves: web pod up -> nginx
+          # `location = /healthcheck` proxies correctly -> the server Service resolves -> the
+          # server booted, which means zod validated every environment variable -> and
+          # `SELECT 1` succeeded, so the database credentials and networking are right.
+          # The body matters: a database failure answers 503 with {"status":"error"}, and an
+          # ingress-shaped 200 error page would slip past a status-only check.
+          check "healthcheck (server + database)" /healthcheck 200 '"status":"ok"'
+
+          # The SPA is served from disk with a history fallback.
+          check "dashboard SPA" / 200 'id="app"'
+
+          # A separate root + try_files + CSP block, and the piece most likely to break in a
+          # config rewrite - invisible until someone clicks "View trace".
+          check "trace viewer" /trace/ 200
+
+          # Proves the /trpc/ proxy and that the router mounted. config.get is the public query
+          # the dashboard uses to learn which sign-in methods this deployment offers.
+          check "tRPC router" /trpc/config.get 200 'passwordAuthEnabled'
+
+          # 403, not 404 (the location block is missing) and not 200 (the HMAC gate is not in
+          # the chain). Proves AUTH_SECRET actually reached the server.
+          check "artifact signature gate" /artifacts/kinora-helm-test-missing 403
+
+          # Anything but 502. A 502 is the signature of an unreachable upstream.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$base/api/v1/projects" || echo 000)
+          if [ "$code" = "502" ] || [ "$code" = "000" ]; then
+            echo "FAIL  ingest API reachable: GET /api/v1/projects -> $code"
+            failures=$((failures + 1))
+          else
+            echo "ok    ingest API reachable (unauthenticated -> $code)"
+          fi
+
+          if [ "$failures" -ne 0 ]; then
+            echo
+            echo "$failures check(s) failed."
+            exit 1
+          fi
+          echo
+          echo "All checks passed."
+      resources: {{- toYaml .Values.tests.resources | nindent 8 }}
+      securityContext:
+        runAsNonRoot: true
+        {{- /* Explicit uid, not just runAsNonRoot: curlimages/curl declares a NAMED user
+             (curl_user), and the kubelet refuses to start a runAsNonRoot container whose image
+             USER it cannot prove is non-root - "image has non-numeric user". 100 is curl_user. */}}
+        runAsUser: 100
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+{{- end }}
