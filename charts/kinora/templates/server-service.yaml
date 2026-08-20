@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  {{- /* This name is interpolated into the web pod's nginx config as the proxy_pass upstream.
+       Because it is templated rather than the literal "server" the compose bundle uses, two
+       releases can coexist in a single namespace. */}}
+  name: {{ include "kinora.server.fullname" . }}
+  labels: {{- include "kinora.componentLabels" (dict "ctx" . "component" "server") | nindent 4 }}
+  {{- with (merge (deepCopy .Values.server.service.annotations) .Values.commonAnnotations) }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.server.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.server.service.port }}
+      targetPort: http
+      protocol: TCP
+      {{- with .Values.server.service.nodePort }}
+      nodePort: {{ . }}
+      {{- end }}
+  selector: {{- include "kinora.selectorLabels" (dict "ctx" . "component" "server") | nindent 4 }}

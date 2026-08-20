@@ -1,0 +1,263 @@
+# Validates and publishes the kinora Helm chart.
+#   pull_request touching charts/**: lint, render every ci/ preset, kubeconform, assert the
+#     guard rails still fail closed, install into kind and run `helm test`, and require a
+#     Chart.yaml version bump.
+#   push to main touching charts/**: publish to ghcr.io/<owner>/charts/kinora.
+#     OCI tags are immutable, so a main push whose chart version already exists warns and skips
+#     rather than failing; an installable prerelease is published on every commit regardless.
+name: Helm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - charts/**
+      - .github/workflows/helm.yml
+      # The chart's nginx ConfigMap is a copy of this file (Helm cannot read outside the chart
+      # directory), so a change here has to be mirrored into charts/kinora/files/.
+      - selfhost/nginx.conf
+  pull_request:
+    paths:
+      - charts/**
+      - .github/workflows/helm.yml
+      - selfhost/nginx.conf
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CHART_DIR: charts/kinora
+  KUBECONFORM_VERSION: v0.6.7
+  HELM_DOCS_VERSION: 1.14.2
+
+jobs:
+  lint:
+    name: lint & render
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          # Needed to diff Chart.yaml against the base ref for the version-bump check.
+          fetch-depth: 0
+
+      # helm ships on the GitHub-hosted ubuntu image, so there is no action to pin here. Print
+      # it so a runner-image change that drops it fails loudly rather than three steps later.
+      - name: helm version
+        run: helm version
+
+      - name: Lint
+        run: helm lint "$CHART_DIR" --strict
+
+      # Every ci/*-values.yaml is a configuration we claim to support; all of them must render.
+      - name: Render every preset
+        run: |
+          mkdir -p /tmp/manifests
+          for f in "$CHART_DIR"/ci/*-values.yaml; do
+            echo "::group::$f"
+            helm template kinora "$CHART_DIR" -f "$f" \
+              > "/tmp/manifests/$(basename "$f" .yaml).yaml"
+            echo "::endgroup::"
+          done
+
+      # The guard rails are the difference between a loud error and a silently broken instance:
+      # a partial S3 config falls back to local disk, and a second replica on a ReadWriteOnce
+      # volume serves 404s for every trace the first one stored. Assert they still fail closed.
+      - name: Guard rails must fail closed
+        run: |
+          failures=0
+          fail_expected() {
+            desc="$1"; shift
+            if helm template kinora "$CHART_DIR" "$@" >/dev/null 2>&1; then
+              echo "::error::guard rail missing - this should not render: $desc"
+              failures=$((failures + 1))
+            else
+              echo "ok (fails as expected): $desc"
+            fi
+          }
+          base="-f $CHART_DIR/ci/default-values.yaml"
+          # shellcheck disable=SC2086 # $base is two intentional words
+          {
+            fail_expected "missing publicUrl"             $base --set publicUrl=
+            fail_expected "publicUrl with a path"         $base --set publicUrl=https://k.example.com/kinora
+            fail_expected "missing AUTH_SECRET"           $base --set auth.secret=
+            fail_expected "missing POSTGRES_PASSWORD"     $base --set postgres.password=
+            fail_expected "partial S3 config"             $base --set storage.s3.bucket=b --set storage.s3.region=r
+            fail_expected "replicas>1 on RWO artifacts"   $base --set server.replicaCount=3
+            fail_expected "autoscaling on RWO artifacts"  $base --set server.autoscaling.enabled=true
+            fail_expected "external PG with no host"      $base --set postgres.enabled=false
+            fail_expected "SSO-only with no provider"     $base --set auth.disablePasswordAuth=true
+            fail_expected "OIDC issuer without clientId"  $base --set auth.oidc.issuerUrl=https://id.example.com
+            fail_expected "smtp.host without from"        $base --set smtp.host=smtp.example.com
+            fail_expected "httpRoute without parentRefs"  $base --set httpRoute.enabled=true
+            fail_expected "no storage at all"             $base --set storage.local.enabled=false
+          }
+          # ...and the escape hatches must NOT be blocked by those guards.
+          helm template kinora "$CHART_DIR" -f "$CHART_DIR/ci/existing-secret-values.yaml" >/dev/null
+          echo "ok: existingSecret / mappings install still renders"
+          exit $failures
+
+      - name: Install kubeconform
+        run: |
+          curl -fsSL -o /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          sudo install /tmp/kubeconform /usr/local/bin/
+
+      # Validate against the oldest and newest Kubernetes the chart claims to support. The CRD
+      # catalog covers the Gateway API HTTPRoute, which is not in the built-in schema store.
+      - name: kubeconform
+        run: |
+          for v in 1.28.0 1.31.0; do
+            echo "::group::kubernetes $v"
+            kubeconform -strict -summary -kubernetes-version "$v" \
+              -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+              /tmp/manifests/*.yaml
+            echo "::endgroup::"
+          done
+
+      # OCI tags are immutable, so main cannot publish a version that already exists. Catch the
+      # forgotten bump here, where it is one commit to fix.
+      - name: Chart version must be bumped
+        if: github.event_name == 'pull_request'
+        run: |
+          new="$(grep -E '^version:' "$CHART_DIR/Chart.yaml" | awk '{print $2}')"
+          old="$(git show "origin/${{ github.base_ref }}:$CHART_DIR/Chart.yaml" 2>/dev/null \
+                 | grep -E '^version:' | awk '{print $2}' || true)"
+          if [ -z "$old" ]; then echo "new chart ($new); nothing to compare against"; exit 0; fi
+          if [ "$old" = "$new" ]; then
+            echo "::error file=$CHART_DIR/Chart.yaml::Chart version is still $old. Bump it - chart releases are immutable in GHCR, so main cannot publish this change otherwise."
+            exit 1
+          fi
+          echo "chart version $old -> $new"
+
+      # The chart ships its own copy of the nginx config because Helm cannot read files outside
+      # the chart directory. Fail if the two drift apart in anything but the templated bits.
+      - name: nginx config drift
+        run: |
+          normalise() {
+            sed -E \
+              -e 's/\{\{[^}]*\}\}/__TPL__/g' \
+              -e 's#proxy_pass http://[^;]+;#proxy_pass __UPSTREAM__;#' \
+              -e 's/listen [^;]+;/listen __PORT__;/' \
+              -e 's/client_max_body_size [^;]+;/client_max_body_size __SIZE__;/' \
+              -e 's/proxy_read_timeout [^;]+;//' \
+              -e 's/add_header Content-Security-Policy .*/__CSP__/' \
+              -e '/^[[:space:]]*(#|$)/d' \
+              -e 's/^[[:space:]]+//' \
+              -e '/^__TPL__$/d' "$1"
+          }
+          if ! diff -u <(normalise selfhost/nginx.conf) <(normalise "$CHART_DIR/files/nginx.conf.tpl"); then
+            echo "::error::selfhost/nginx.conf and $CHART_DIR/files/nginx.conf.tpl have diverged. The published web image bakes the CLOUD nginx config, so the chart must carry the self-host one - mirror the change into both."
+            exit 1
+          fi
+          echo "nginx configs agree"
+
+      # charts/kinora/README.md is generated from values.yaml + README.md.gotmpl.
+      - name: README is up to date
+        run: |
+          curl -fsSL "https://github.com/norwoodj/helm-docs/releases/download/v${HELM_DOCS_VERSION}/helm-docs_${HELM_DOCS_VERSION}_Linux_x86_64.tar.gz" \
+            | tar -xz -C /tmp helm-docs
+          /tmp/helm-docs --chart-search-root=charts
+          if ! git diff --exit-code -- charts; then
+            echo "::error::charts/kinora/README.md is stale. Run: helm-docs --chart-search-root=charts"
+            exit 1
+          fi
+
+  install:
+    name: install (kind)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: lint
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3 # v1.12.0
+        with:
+          cluster_name: kinora
+          wait: 120s
+
+      # The default path: bundled Postgres, artifacts on a PVC, one server replica. This is what
+      # most self-hosters actually run, and the only check that catches an install which is
+      # green but has no working API proxy.
+      - name: Install
+        run: |
+          helm install kinora "$CHART_DIR" \
+            --namespace kinora --create-namespace \
+            -f "$CHART_DIR/ci/kind-values.yaml" \
+            --wait --timeout 10m
+
+      - name: helm test
+        run: helm test kinora --namespace kinora --logs
+
+      # Upgrading in place is the operation self-hosters run most often. This proves the migrate
+      # init container is idempotent and that nothing immutable moved.
+      - name: Upgrade in place
+        run: |
+          helm upgrade kinora "$CHART_DIR" \
+            --namespace kinora \
+            -f "$CHART_DIR/ci/kind-values.yaml" \
+            --set retention.artifactDays=7 \
+            --wait --timeout 10m
+          helm test kinora --namespace kinora --logs
+
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl -n kinora get all,pvc,cm,secret
+          kubectl -n kinora describe pods
+          kubectl -n kinora logs -l app.kubernetes.io/component=server --all-containers --tail=200 || true
+          kubectl -n kinora logs -l app.kubernetes.io/component=web --tail=200 || true
+          kubectl -n kinora logs -l app.kubernetes.io/component=postgres --tail=100 || true
+
+  publish:
+    name: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, install]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      # GHCR requires a lowercase path; repository_owner keeps the owner's casing.
+      - name: Resolve chart repository
+        run: |
+          echo "OCI_REPO=oci://ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/charts" >> "$GITHUB_ENV"
+          echo "VERSION=$(grep -E '^version:' "$CHART_DIR/Chart.yaml" | awk '{print $2}')" >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' \
+            | helm registry login ghcr.io --username '${{ github.actor }}' --password-stdin
+
+      # OCI tags are immutable, so GHCR rejects a re-push. A main commit that did not bump the
+      # chart version - a README tweak, a merge that skipped the PR check - must not turn the
+      # build red. Warn and move on; the prerelease below still publishes.
+      - name: Publish release version
+        run: |
+          if helm show chart "$OCI_REPO/kinora" --version "$VERSION" >/dev/null 2>&1; then
+            echo "::warning file=$CHART_DIR/Chart.yaml::kinora chart $VERSION is already published; skipping the release push. Bump Chart.yaml:version to cut a new release."
+            exit 0
+          fi
+          helm package "$CHART_DIR" --destination /tmp/chart
+          helm push "/tmp/chart/kinora-${VERSION}.tgz" "$OCI_REPO"
+          echo "Published kinora chart $VERSION" >> "$GITHUB_STEP_SUMMARY"
+
+      # An always-publishable prerelease so main is installable between releases:
+      #   helm install kinora oci://ghcr.io/<owner>/charts/kinora --devel
+      # Helm rewrites the SemVer build-metadata `+` into `_` for the OCI tag.
+      - name: Publish main prerelease
+        run: |
+          DEV_VERSION="${VERSION}-main.${{ github.run_number }}+${GITHUB_SHA::7}"
+          helm package "$CHART_DIR" --destination /tmp/dev --version "$DEV_VERSION"
+          helm push /tmp/dev/kinora-*.tgz "$OCI_REPO"
+          echo "Published prerelease $DEV_VERSION" >> "$GITHUB_STEP_SUMMARY"

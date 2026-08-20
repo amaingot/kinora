@@ -1,0 +1,17 @@
+# S3 artifact storage, which is what unlocks more than one server replica.
+publicUrl: https://kinora.example.com
+auth:
+  secret: test-auth-secret-not-a-real-one
+postgres:
+  password: test-postgres-password
+storage:
+  local:
+    enabled: false
+  s3:
+    endpoint: https://s3.us-east-1.amazonaws.com
+    region: us-east-1
+    bucket: kinora-artifacts
+    accessKeyId: AKIAEXAMPLE
+    secretAccessKey: test-secret-access-key
+server:
+  replicaCount: 3

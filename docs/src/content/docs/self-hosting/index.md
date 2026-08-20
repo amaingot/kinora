@@ -1,11 +1,17 @@
 ---
 title: Self-hosting kinora
-description: Run the whole stack (Postgres + server + dashboard) with one docker compose, on a single origin.
+description: Run the whole stack (Postgres + server + dashboard) yourself - with Docker Compose on one box, or the Helm chart on Kubernetes.
 ---
 
-Self-host runs the whole stack (Postgres + server + dashboard) with one `docker compose`, on a
-single origin, with trace artifacts on a local volume. It runs with `KINORA_CLOUD=false`: no
-billing, and every feature (including alerts) is unlimited.
+Self-host runs the whole stack - Postgres, the server, and the dashboard - on a single origin,
+with trace artifacts on a volume you own. It runs with `KINORA_CLOUD=false`: no billing, and
+every feature (including alerts) is unlimited.
+
+There are two supported ways to run it:
+
+- **Docker Compose** on a single box, covered below. The simplest thing that works.
+- **[Kubernetes](/self-hosting/kubernetes/)**, with the official Helm chart. Same stack, same
+  single-origin topology, and every setting on this page is a chart value.
 
 ## Quickstart
 
@@ -71,6 +77,7 @@ container behind your own TLS proxy (Caddy, Traefik, nginx, a load balancer) for
 
 ## Next
 
+- [Kubernetes (Helm)](/self-hosting/kubernetes/): the same stack on your own cluster.
 - [Configuration](/self-hosting/configuration/): every `.env` variable.
 - [Storage & artifacts](/self-hosting/storage/): local volume vs S3-compatible store.
 - [Upgrading & backups](/self-hosting/upgrading/): pull new images, pin or roll back, and back up your volumes.

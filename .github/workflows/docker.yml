@@ -1,5 +1,8 @@
 # Builds the server + web images and publishes them to this repo's GitHub Container Registry.
 #   main push / dispatch: ghcr.io/<owner>/kinora-{server,web}:{latest,sha-<7>} (multi-arch)
+#   app-v* tag push:      ...:{X.Y.Z, X.Y, latest, sha-<7>} - the release charts/kinora pins as
+#                         its appVersion. `app-v*` and not `v*`: that namespace already belongs
+#                         to desktop-release.yml, which versions from packages/desktop.
 #   pull_request:         build only (both arches), nothing pushed
 # Each arch builds on its own native runner (no QEMU); `merge` stitches the per-arch digests into
 # one manifest list per image. This is what selfhost/docker-compose.yml pulls.
@@ -8,14 +11,20 @@ name: Docker
 on:
   push:
     branches: [main]
+    # Release tags. NOTE: one `push` block cannot carry per-ref path filters, so paths-ignore
+    # below also applies to tag pushes - if a release tag ever lands on a docs-only commit it
+    # gets filtered out. Re-run via workflow_dispatch against the tag ref if that happens.
+    tags: ['app-v*']
     paths-ignore:
       - website/**
       - docs/**
+      - charts/**
       - '**/*.md'
   pull_request:
     paths-ignore:
       - website/**
       - docs/**
+      - charts/**
       - '**/*.md'
   workflow_dispatch:
 
@@ -129,14 +138,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # latest tracks main; sha-<7> pins an exact commit (KINORA_IMAGE_TAG in selfhost/.env).
+      # X.Y.Z / X.Y come from the app-v* tag and no-op on a main push; sha-<7> pins an exact
+      # commit (KINORA_IMAGE_TAG in selfhost/.env, image.tag in charts/kinora/values.yaml).
+      # latest tracks main (is_default_branch, which is false on a tag ref) and the newest
+      # app-v* release (latest=auto, below).
       - name: Image metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.IMAGE }}
+          # The default, spelled out: this is what puts `latest` on an app-v* release, and it
+          # deliberately skips prereleases - app-v1.0.0-rc.1 publishes 1.0.0-rc.1 and nothing else.
+          flavor: latest=auto
+          # `match` extracts the bare version from the tag: metadata-action parses the whole ref
+          # name, and `app-v0.2.0` is not valid semver, so without it both rules warn and no-op
+          # and a release publishes nothing but sha-<7> - leaving the chart's appVersion image
+          # tag missing and every default `helm install` in ImagePullBackOff.
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}},match=^app-v(.*)$
+            type=semver,pattern={{major}}.{{minor}},match=^app-v(.*)$
             type=sha
 
       - name: Create manifest list and push

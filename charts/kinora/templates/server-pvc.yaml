@@ -1,0 +1,29 @@
+{{- if include "kinora.localStorage.enabled" . }}
+{{- if not .Values.storage.local.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "kinora.artifactsClaimName" . }}
+  labels: {{- include "kinora.componentLabels" (dict "ctx" . "component" "server") | nindent 4 }}
+  annotations:
+    {{- if .Values.storage.local.retainOnDelete }}
+    {{- /* Traces are the product. Losing them to a `helm uninstall` is the worse failure mode,
+         so the claim survives by default. A later re-install must then either delete this PVC
+         or use `helm install --take-ownership`. */}}
+    helm.sh/resource-policy: keep
+    {{- end }}
+    {{- with (merge (deepCopy .Values.storage.local.annotations) .Values.commonAnnotations) }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  accessModes: {{- toYaml .Values.storage.local.accessModes | nindent 4 }}
+  {{- with .Values.storage.local.storageClass }}
+  {{- /* Only emitted when set: `storageClassName: ""` means "no dynamic provisioning", which is
+       not the same as "use the cluster default". */}}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.local.size }}
+{{- end }}
+{{- end }}

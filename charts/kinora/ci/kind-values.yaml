@@ -1,0 +1,32 @@
+# What the kind install job runs. Same shape as default-values.yaml, sized to fit a CI runner.
+publicUrl: http://localhost:8080
+auth:
+  secret: test-auth-secret-not-a-real-one
+postgres:
+  password: test-postgres-password
+  persistence:
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+storage:
+  local:
+    size: 1Gi
+    # A kind cluster is torn down with the job; keeping the PVC would only strand it.
+    retainOnDelete: false
+image:
+  # The chart's appVersion points at a release tag that may not be published yet; the kind job
+  # needs an image that definitely exists today.
+  tag: latest
+server:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+web:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi

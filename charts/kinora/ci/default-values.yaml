@@ -1,0 +1,6 @@
+# The minimum: bundled Postgres, artifacts on a PersistentVolume, no ingress.
+publicUrl: https://kinora.example.com
+auth:
+  secret: test-auth-secret-not-a-real-one
+postgres:
+  password: test-postgres-password

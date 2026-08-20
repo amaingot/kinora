@@ -1,0 +1,15 @@
+.DS_Store
+.git/
+.gitignore
+*.swp
+*.bak
+*.tmp
+*.orig
+*~
+.project
+.idea/
+*.tmproj
+.vscode/
+# Test fixtures are validated in CI, not shipped to users.
+ci/
+README.md.gotmpl

@@ -1,0 +1,33 @@
+{{- if .Values.httpRoute.enabled }}
+{{- /* Prefer the GA API when the cluster has it; fall back to v1beta1 for older Gateway API
+     installs. */}}
+apiVersion: {{ if .Capabilities.APIVersions.Has "gateway.networking.k8s.io/v1" }}gateway.networking.k8s.io/v1{{ else }}gateway.networking.k8s.io/v1beta1{{ end }}
+kind: HTTPRoute
+metadata:
+  name: {{ include "kinora.fullname" . }}
+  labels: {{- include "kinora.labels" . | nindent 4 }}
+  {{- with (merge (deepCopy .Values.httpRoute.annotations) .Values.commonAnnotations) }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs: {{- toYaml .Values.httpRoute.parentRefs | nindent 4 }}
+  hostnames:
+    {{- if .Values.httpRoute.hostnames }}
+    {{- toYaml .Values.httpRoute.hostnames | nindent 4 }}
+    {{- else }}
+    - {{ include "kinora.publicHost" . | quote }}
+    {{- end }}
+  rules:
+    {{- with .Values.httpRoute.extraRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- /* The catch-all comes last so any extraRules (for example a stricter policy on browser
+         paths, with /api/v1 left open for token-authenticated CI uploads) match first. */}}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "kinora.web.fullname" . }}
+          port: {{ .Values.web.service.port }}
+{{- end }}

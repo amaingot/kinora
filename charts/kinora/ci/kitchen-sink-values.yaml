@@ -1,0 +1,82 @@
+# Proves every raw-passthrough knob renders: sidecars, extra env, volumes, autoscaling, PDBs,
+# scheduling constraints and the nginx escape hatches.
+publicUrl: https://kinora.example.com
+auth:
+  secret: test-auth-secret-not-a-real-one
+postgres:
+  password: test-postgres-password
+  extraArgs: [-c, max_connections=200]
+  nodeSelector:
+    kubernetes.io/arch: arm64
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: database
+      effect: NoSchedule
+storage:
+  local:
+    enabled: false
+  s3:
+    endpoint: https://minio.example.com
+    region: us-east-1
+    bucket: kinora
+    accessKeyId: minio
+    secretAccessKey: test-secret-access-key
+commonLabels:
+  team: platform
+commonAnnotations:
+  example.com/owner: qa
+imagePullSecrets:
+  - name: ghcr-pull
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/kinora
+server:
+  autoscaling:
+    enabled: true
+    targetMemoryUtilizationPercentage: 80
+  pdb:
+    enabled: true
+  startupProbe:
+    enabled: true
+  priorityClassName: high
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/component: server
+  extraEnv:
+    - name: NODE_OPTIONS
+      value: --max-old-space-size=1536
+  extraEnvFrom:
+    - configMapRef:
+        name: kinora-extra
+  sidecars:
+    - name: cloud-sql-proxy
+      image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
+      args: [--private-ip, --port=5432, 'project:region:instance']
+  extraVolumes:
+    - name: scratch
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: scratch
+      mountPath: /scratch
+web:
+  autoscaling:
+    enabled: true
+  pdb:
+    enabled: true
+  nginx:
+    clientMaxBodySize: 100m
+    extraConnectSrc:
+      - https://telemetry.example.com
+    extraServerConfig: |
+      set_real_ip_from 10.0.0.0/8;
+      real_ip_header X-Forwarded-For;
+ingress:
+  enabled: true
+  className: nginx
+  tls:
+    enabled: true

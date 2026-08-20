@@ -1,0 +1,24 @@
+{{- if not .Values.web.nginx.existingConfigMap }}
+{{- /*
+This ConfigMap is not optional decoration - without it the install is silently broken.
+
+The published ghcr.io/<owner>/kinora-web image is built with no NGINX_CONF build arg, so it
+ships packages/web/nginx.conf: the CLOUD config, which serves the SPA and the trace viewer but
+has no /api/, /trpc/ or /artifacts/ proxy at all. docker-compose bind-mounts
+selfhost/nginx.conf over it; on Kubernetes this ConfigMap is that mount.
+
+Templating it (rather than baking it into an image) is also what fixes the three things a
+baked config cannot express: the upstream Service name, the body-size limit, and the CSP.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kinora.fullname" . }}-nginx
+  labels: {{- include "kinora.componentLabels" (dict "ctx" . "component" "web") | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  default.conf: |
+{{ tpl (.Files.Get "files/nginx.conf.tpl") . | indent 4 }}
+{{- end }}

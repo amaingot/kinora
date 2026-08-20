@@ -6,6 +6,10 @@ description: Every environment variable for a self-hosted kinora, copied from se
 Self-host is configured entirely through `.env` (read by `docker-compose.yml`). Copy
 `.env.example` to `.env` and edit it. Below is every variable.
 
+Running the [Helm chart](/self-hosting/kubernetes/) instead? The same configuration lives in
+`values.yaml` - `PUBLIC_URL` becomes `publicUrl`, and each variable below has a value that sets
+it. [Environment variables](/reference/environment/) is the authoritative list for both.
+
 ## Required
 
 | Variable | Notes |

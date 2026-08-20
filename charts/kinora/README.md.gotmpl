@@ -1,0 +1,305 @@
+{{ template "chart.header" . }}
+
+{{ template "chart.description" . }}
+
+kinora tracks pass rates, trends and flaky tests across projects and over time, and opens the
+full Playwright trace inline for any failure. This chart runs the whole thing on your own
+cluster: the API server, the dashboard, and - if you want it - the database.
+
+{{ template "chart.badgesSection" . }}
+
+## TL;DR
+
+```bash
+helm install kinora oci://ghcr.io/amaingot/charts/kinora \
+  --namespace kinora --create-namespace \
+  --set publicUrl=https://kinora.example.com \
+  --set auth.secret="$(openssl rand -hex 32)" \
+  --set postgres.password="$(openssl rand -hex 16)" \
+  --set ingress.enabled=true --set ingress.className=nginx
+```
+
+Then `helm test kinora -n kinora --logs` to confirm the install actually works end to end -
+see [Verifying an install](#verifying-an-install).
+
+## Prerequisites
+
+- Kubernetes 1.28+
+- Helm 3.8+ (OCI registry support)
+- A default StorageClass, unless you set `storage.s3` and `postgres.enabled=false`
+- An ingress controller or a Gateway API implementation, and a DNS name pointing at it
+
+## What it deploys
+
+```
+Ingress | HTTPRoute
+        |
+        v
+  web Service :80  ->  nginx: dashboard SPA, /trace/ viewer,
+        |                    and a reverse proxy for /api, /trpc, /artifacts
+        v
+  server Service :3000  ->  Postgres :5432   (bundled StatefulSet, or your own)
+        |
+        +--> artifacts: a PersistentVolume, or any S3-compatible bucket
+```
+
+**Everything arrives on one hostname, and that is not a stylistic choice.** The dashboard is
+served with a `connect-src 'self'` Content-Security-Policy and its session cookie is host-only,
+so the API has to answer on the same origin as the app. nginx inside the web pod does that
+split. Do not try to route `/api` to the server Service directly from your Ingress - it will
+fail in ways that look like application bugs.
+
+One consequence worth knowing: the published `kinora-web` image ships the *cloud* nginx config,
+which has no API proxy at all. This chart mounts the self-host config as a ConfigMap. If you
+replace it via `web.nginx.existingConfigMap`, you own that contract.
+
+## `publicUrl` is the one value you must get right
+
+It becomes both `BASE_URL` and `WEB_ORIGIN` on the server, and it must be the URL a **browser**
+uses - not a cluster-internal Service name.
+
+- Artifact download URLs are built from it and are fetched by the trace viewer's service worker
+  from the browser. Get it wrong and the dashboard loads perfectly while no trace ever opens.
+- It is the only trusted origin for sign-in, so a mismatch shows up as a login that silently
+  fails CSRF.
+
+For a local trial, port-forward and set it to match:
+
+```bash
+helm install kinora oci://ghcr.io/amaingot/charts/kinora -n kinora --create-namespace \
+  --set publicUrl=http://localhost:8080 \
+  --set auth.secret="$(openssl rand -hex 32)" \
+  --set postgres.password="$(openssl rand -hex 16)"
+kubectl -n kinora port-forward svc/kinora-web 8080:80
+```
+
+## Secrets
+
+The chart **never generates a credential**. A generated default is re-rendered on every
+`helm upgrade`, which would roll `AUTH_SECRET` (signing out every user) and `POSTGRES_PASSWORD`
+(which `initdb` already burned into the database). So you supply them, one of four ways - in
+increasing precedence:
+
+| Tier | Knob | Use when |
+| --- | --- | --- |
+| 1 | inline values (`auth.secret`, `postgres.password`, ...) | trying it out, or you already keep values in a private repo |
+| 2 | `secrets.existingSecret` | you pre-created one Secret whose keys are the env var names |
+| 3 | `secrets.mappings` | the Secret's key names are not yours to choose (CloudNativePG, External Secrets, Sealed Secrets) |
+| 4 | `server.extraEnv` | anything else |
+
+Precedence falls out of Kubernetes itself, not from anything the chart arbitrates: every `env`
+entry beats every `envFrom` source regardless of order, and among `envFrom` sources a later one
+beats an earlier one. Tiers 1 and 2 are `envFrom`; tiers 3 and 4 are `env`.
+
+`server.extraEnvFrom` is **not** the top of that ladder. It is an `envFrom` source, rendered
+after the chart's own Secret and after `secrets.existingSecret`, so it overrides tiers 1 and 2 -
+and nothing else. Tiers 3 and 4 still win over it, as does every variable the chart renders as a
+plain `env` entry (`BASE_URL`, `POSTGRES_HOST`, `S3_BUCKET`, ...). Use `server.extraEnv` when you
+need the last word.
+
+**Tier 2** - one Secret, keys named after the environment variables:
+
+```bash
+kubectl -n kinora create secret generic kinora-credentials \
+  --from-literal=AUTH_SECRET="$(openssl rand -hex 32)" \
+  --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+  --from-literal=OIDC_CLIENT_SECRET=...
+```
+```yaml
+secrets:
+  existingSecret: kinora-credentials
+```
+
+Recognised keys: `AUTH_SECRET`, `POSTGRES_PASSWORD`, `GOOGLE_CLIENT_SECRET`,
+`GITHUB_CLIENT_SECRET`, `OIDC_CLIENT_SECRET`, `SMTP_PASS`, `SLACK_CLIENT_SECRET`,
+`S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
+
+**Tier 3** - against a CloudNativePG cluster, whose generated Secret uses `password`:
+
+```yaml
+secrets:
+  mappings:
+    POSTGRES_PASSWORD:
+      name: kinora-pg-app
+      key: password
+```
+
+> **Rotating `POSTGRES_PASSWORD` is not a values change.** With the bundled Postgres, that value
+> is read once, by `initdb`, on first start. Editing it later rewrites the Secret but not the
+> database, and the migration init container then fails authentication in a way that looks like
+> a broken Secret mount. Run `ALTER ROLE kinora WITH PASSWORD '...'` inside the pod first, then
+> upgrade.
+
+## Common configurations
+
+### An external database
+
+```yaml
+postgres:
+  enabled: false
+  host: kinora.abc123.us-east-1.rds.amazonaws.com
+  username: kinora
+  database: kinora
+  password: ...
+  sslMode: no-verify
+```
+
+kinora has no `DATABASE_URL` and no sslmode setting of its own, but node-postgres - which both
+the query layer and the migrator use - honours `PGSSLMODE`, which is what `postgres.sslMode`
+sets. It does **not** read `PGSSLROOTCERT`, so `require` verifies against Node's default CA
+bundle; RDS and Cloud SQL certificates are not in it, which is why `no-verify` is usually the
+setting that works. For a proper verified connection, or for IAM auth, run a proxy in
+`server.sidecars` and point `postgres.host` at `127.0.0.1`.
+
+### S3 artifact storage
+
+```yaml
+storage:
+  local:
+    enabled: false
+  s3:
+    endpoint: https://s3.us-east-1.amazonaws.com
+    region: us-east-1
+    bucket: kinora-artifacts
+    accessKeyId: ...
+    secretAccessKey: ...
+server:
+  replicaCount: 3
+```
+
+All five values are required. The server treats a partial configuration as "no S3" and falls
+back to local disk without saying anything, so the chart refuses to render one instead.
+
+The bucket needs **CORS allowing `GET` and the `Range` header** from your `publicUrl`: the trace
+viewer's service worker range-fetches `trace.zip` straight from the browser. The chart adds the
+bucket's origin to the dashboard's `connect-src` for you.
+
+S3 is also what unlocks more than one server replica - see [Scaling](#scaling).
+
+### SSO
+
+```yaml
+auth:
+  disablePasswordAuth: true
+  oidc:
+    issuerUrl: https://id.example.com/realms/main
+    clientId: kinora
+    clientSecret: ...
+    providerName: Example ID
+```
+
+Register this redirect URI with your identity provider. The final path segment is fixed and not
+configurable:
+
+```
+<publicUrl>/api/auth/oauth2/callback/oidc
+```
+
+Users are provisioned on first sign-in, and an e-mail that already has an account is linked
+rather than duplicated. `disablePasswordAuth: true` with no provider configured is refused at
+install time, because the server would refuse to boot.
+
+### Retention
+
+**The defaults keep every run and every trace forever.** Traces are what fill the disk. The
+gentlest useful setting drops old trace files while keeping all your history and trends - old
+runs simply lose their "View trace" link:
+
+```yaml
+retention:
+  artifactDays: 30
+```
+
+`runDays` and `keepLastRuns` delete whole runs, history included.
+
+The sweep runs inside the server process, once at boot and then daily. With several replicas
+they each sweep independently: harmless (every delete is idempotent) but wasteful. To sweep
+immediately:
+
+```bash
+kubectl -n kinora exec deploy/kinora-server -c server -- node dist/scripts/purge-expired-runs.mjs
+```
+
+### Scaling
+
+`server.replicaCount` must stay `1` while artifacts are on a ReadWriteOnce volume: `/artifacts`
+is served off local disk by whichever replica the Service happens to pick, so a second replica
+returns 404 for every trace the first one stored. The Deployment is pinned to `strategy:
+Recreate` for the same reason. The chart refuses to render a configuration that would break
+this. Configure `storage.s3` (or a ReadWriteMany volume) first.
+
+The web tier is stateless and scales freely.
+
+## Verifying an install
+
+```bash
+helm test kinora -n kinora --logs
+```
+
+This is worth running, because the chart's characteristic failure is an install that looks
+completely healthy and is not: if the nginx ConfigMap never mounts, every pod is Ready, the
+dashboard renders, and every API call 404s. The test drives the web Service - so the proxy
+itself is under test - and checks that `/healthcheck` returns `{"status":"ok"}` (which proves
+the server booted, validated its whole environment, and reached the database), that the SPA and
+trace viewer are served, that tRPC answers, and that `/artifacts/` is gated by a signature
+rather than open or missing. Every assertion is a read, so it is safe against production.
+
+## Upgrading
+
+```bash
+helm upgrade kinora oci://ghcr.io/amaingot/charts/kinora -n kinora \
+  --reuse-values --version <chart-version> --atomic --timeout 10m
+```
+
+Three versions are in play and they move independently:
+
+| | What it is |
+| --- | --- |
+| `Chart.yaml: version` | the chart's own version - what `--version` selects |
+| `Chart.yaml: appVersion` | the kinora release the chart was tested against |
+| `image.tag` | what actually runs. Empty means `appVersion`; pin a `sha-<commit>` to track main |
+
+Migrations run as an init container on every rollout, so there is no separate step. But note
+that a `helm rollback` across a migration does **not** roll the schema back - restore the
+database if you need to go backwards through one.
+
+## Uninstalling
+
+```bash
+helm uninstall kinora -n kinora
+```
+
+Both volumes deliberately survive: the artifacts PVC carries `helm.sh/resource-policy: keep`
+(disable with `storage.local.retainOnDelete=false`), and the Postgres PVC belongs to the
+StatefulSet controller, which Helm never deletes. To actually delete the data:
+
+```bash
+kubectl -n kinora delete pvc -l app.kubernetes.io/instance=kinora
+kubectl -n kinora delete pvc data-kinora-postgres-0
+```
+
+A kept PVC means a later re-install has to either delete it first or use
+`helm install --take-ownership`.
+
+## Known limitations
+
+- **No retention CronJob.** The purge is a no-op unless the retention variables are set, and
+  setting them also starts the in-process sweeper - there is no way to have one without the
+  other today, so the chart does not ship a CronJob that would silently do nothing.
+- **Raising `web.nginx.clientMaxBodySize` above `100m` accomplishes nothing.** The server
+  hardcodes a 100 MB limit on `/api/v1/*`; a larger upload is simply rejected one layer deeper.
+- **The ingest rate limiter is per-process and in-memory**, so the effective ceiling is
+  `server.replicaCount` x `ingestRateLimit`, and it keys on the leftmost `X-Forwarded-For` hop.
+- **The bundled Postgres has no HA, no backups and no pooler.** It is a convenience, not a
+  production database.
+- **`KINORA_CLOUD` is pinned false.** The `POLAR_*` billing and feedback-tracker variables are
+  intentionally unreachable; self-host has every feature unlimited anyway.
+- **No NetworkPolicy templates** yet.
+
+## Configuration
+
+{{ template "chart.valuesSection" . }}
+
+{{ template "chart.maintainersSection" . }}
+
+{{ template "chart.sourcesSection" . }}

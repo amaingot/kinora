@@ -23,6 +23,23 @@ KINORA_IMAGE_TAG=sha-44b6925
 If you build from source (`docker-compose.build.yml`), add `--build` to the `up` command instead
 of pulling.
 
+## Upgrading on Kubernetes
+
+```bash
+helm upgrade kinora oci://ghcr.io/amaingot/charts/kinora -n kinora \
+  --reuse-values --version <chart-version> --atomic --timeout 10m
+```
+
+Migrations run as an init container on every rollout, so there is no separate step - the same
+promise the compose bundle makes with its `migrate` service. Two caveats:
+
+- A `helm rollback` across a migration does **not** roll the schema back. Restore the database if
+  you need to go backwards through one.
+- `image.tag` is what actually runs. Empty means the chart's `appVersion`; pin a `sha-<commit>`
+  to track `main`, exactly like `KINORA_IMAGE_TAG`.
+
+The chart's own version (`--version`) moves independently of the kinora release it deploys.
+
 ## Backups
 
 Two named volumes hold all state:
