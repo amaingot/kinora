@@ -1,0 +1,26 @@
+# S3 artifacts with NO static credentials: the pod's workload identity (EKS IRSA here) supplies
+# them through the AWS SDK's default provider chain. Also the zero-PersistentVolume shape -
+# nothing in this release stores anything on a disk inside the cluster.
+publicUrl: https://kinora.example.com
+auth:
+  secret: test-auth-secret-not-a-real-one
+postgres:
+  enabled: false
+  host: kinora.abc123.us-east-1.rds.amazonaws.com
+  password: test-postgres-password
+  sslMode: no-verify
+storage:
+  local:
+    enabled: false
+  s3:
+    endpoint: https://s3.us-east-1.amazonaws.com
+    region: us-east-1
+    bucket: kinora-artifacts
+    # Virtual-hosted style, so the presigned-URL origin is kinora-artifacts.s3.us-east-1...
+    # and the dashboard's CSP connect-src has to name that host rather than the endpoint.
+    forcePathStyle: false
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/kinora
+server:
+  replicaCount: 3

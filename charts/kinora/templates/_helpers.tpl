@@ -125,8 +125,9 @@ app.kubernetes.io/component: {{ .component }}
 
 {{- /* ---------------------------------------------------------------- storage */}}
 
-{{- /* S3 is used when the three non-secret coordinates are set; credentials may arrive from an
-     existing Secret, so they are not part of this test (validateValues checks them). */}}
+{{- /* S3 is used when the three non-secret coordinates are set - which is exactly what the
+     server's resolveS3() keys off. Credentials are deliberately not part of this test: they may
+     arrive from an existing Secret, or not exist at all when the pod uses workload identity. */}}
 {{- define "kinora.s3.enabled" -}}
 {{- if and .Values.storage.s3.endpoint .Values.storage.s3.region .Values.storage.s3.bucket -}}true{{- end -}}
 {{- end -}}
@@ -201,9 +202,18 @@ S3_SECRET_ACCESS_KEY: {{ . | toJson }}
 {{- if include "kinora.s3.enabled" . -}}
 {{- /* Presigned S3 artifact URLs live on the bucket's own origin and the trace viewer's service
      worker range-fetches them from the browser, so connect-src 'self' alone would block them.
-     The bucket also needs CORS for GET + Range - see docs/self-hosting/storage. */}}
+     The bucket also needs CORS for GET + Range - see docs/self-hosting/storage.
+
+     Which origin depends on the addressing style: path-style keeps the bucket in the path and
+     the origin is just the endpoint, while virtual-hosted style moves the bucket INTO the
+     hostname. Get this wrong and the dashboard renders perfectly while every trace fails to
+     load, with the only evidence a CSP violation in the browser console. */}}
 {{- $u := urlParse .Values.storage.s3.endpoint -}}
+{{- if .Values.storage.s3.forcePathStyle -}}
 {{- $connect = append $connect (printf "%s://%s" $u.scheme $u.host) -}}
+{{- else -}}
+{{- $connect = append $connect (printf "%s://%s.%s" $u.scheme .Values.storage.s3.bucket $u.host) -}}
+{{- end -}}
 {{- end -}}
 {{- range .Values.web.nginx.extraConnectSrc -}}
 {{- $connect = append $connect . -}}
