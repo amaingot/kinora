@@ -103,7 +103,7 @@ Binary artifacts (trace.zip) go through the `Storage` interface in `src/lib/stor
 
 ### Frontend
 
-`packages/web` is Vue 3 + vue-router + tRPC client + Tailwind v4. The tRPC client (`src/lib/trpc.ts`) imports `AppRouter` **as a type** from `@kinora/server` for end-to-end type safety; requests send credentials for the session cookie. Routing (`src/router/index.ts`) gates on `session.ensure()` with a `meta.public` flag for login/signup. Build-time config comes from `VITE_KINORA_*` env, validated by `@julr/vite-plugin-validate-env` in `vite.config.ts` (`VITE_KINORA_SERVER_URL` is required). `@` aliases `src/`.
+`packages/web` is Vue 3 + vue-router + tRPC client + Tailwind v4. The tRPC client (`src/lib/trpc.ts`) imports `AppRouter` **as a type** from `@kinora/server` for end-to-end type safety; requests send credentials for the session cookie. Routing (`src/router/index.ts`) gates on `session.ensure()` with a `meta.public` flag for login/signup. Build-time config comes from `VITE_KINORA_*` env, validated by `@julr/vite-plugin-validate-env` in `vite.config.ts`. `VITE_KINORA_SERVER_URL` is optional: unset/empty means `env.serverUrl` (`src/lib/env.ts`) falls back to the page origin at runtime, which is how one published web image serves any self-host `PUBLIC_URL`. `@` aliases `src/`.
 
 `@kinora/ui` is the shared shadcn-vue design system (Reka UI + Tailwind), consumed by both `web` and `trace-viewer`. Its `exports` map exposes component groups via `./*`.
 
@@ -130,10 +130,12 @@ Binary artifacts (trace.zip) go through the `Storage` interface in `src/lib/stor
 
 Two per-package Dockerfiles, both built from the **repo root** (workspace context):
 
-- `packages/web/Dockerfile`: builds `web` + `trace-viewer` static output, serves both from nginx (dashboard SPA at `/`, viewer at `/trace`). `VITE_KINORA_SERVER_URL` is baked at build time via `--build-arg`; `VITE_KINORA_VIEWER_URL` defaults to `/trace/` (same origin).
+- `packages/web/Dockerfile`: builds `web` + `trace-viewer` static output, serves both from nginx (dashboard SPA at `/`, viewer at `/trace`). `VITE_KINORA_SERVER_URL` is an optional `--build-arg` (cloud passes `https://api.kinora.dev`; the published self-host image omits it); `VITE_KINORA_VIEWER_URL` defaults to `/trace/` (same origin).
 - `packages/server/Dockerfile`: the Node/`tsx` server image. Its `migrate.mjs` is also the entrypoint for the one-shot migration step.
 
-`selfhost/` is the shipped single-origin self-host bundle: `docker-compose.yml` (Postgres + one-shot `migrate` + server + web) and `nginx.conf` (the web container reverse-proxies `/api`, `/trpc`, `/artifacts` to the server, so there's no CORS and the cookie stays host-only). Configured by `selfhost/.env`; runs `KINORA_CLOUD=false`.
+The **Docker** workflow (`.github/workflows/docker.yml`) publishes both as `ghcr.io/<owner>/kinora-server` and `ghcr.io/<owner>/kinora-web`: every `main` push builds amd64 + arm64 on native runners (`ubuntu-latest` / `ubuntu-24.04-arm`, pushed by digest), then a `merge` job stitches them into one manifest list tagged `latest` + `sha-<7>`; pull requests build both arches without pushing. The web image is built without `VITE_KINORA_SERVER_URL` (runtime same-origin fallback, see Frontend).
+
+`selfhost/` is the shipped single-origin self-host bundle: `docker-compose.yml` (Postgres + one-shot `migrate` + server + web, pulling the GHCR images above; `KINORA_IMAGE_TAG` pins a `sha-*` tag), `docker-compose.build.yml` (override that builds from the checkout instead), and `nginx.conf` (the web container reverse-proxies `/api`, `/trpc`, `/artifacts` to the server, so there's no CORS and the cookie stays host-only). Configured by `selfhost/.env`; runs `KINORA_CLOUD=false`.
 
 ### Marketing site
 

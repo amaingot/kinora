@@ -10,7 +10,7 @@ From this `selfhost/` directory:
 ```bash
 cp .env.example .env
 # edit at least: PUBLIC_URL, AUTH_SECRET, POSTGRES_PASSWORD
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
 
 Open `PUBLIC_URL` (default http://localhost:8080) and create your account. The first user owns
@@ -19,10 +19,18 @@ their workspace; invite teammates from Settings.
 ## What's here
 
 - `docker-compose.yml` - Postgres, a one-shot migrate, the server, and the web container.
+- `docker-compose.build.yml` - optional override to build the images from this checkout (see below).
 - `nginx.conf` - the web container's reverse proxy (serves the dashboard + trace viewer, proxies the API to the server).
 - `.env.example` - all configuration.
 
-Images are built from the repo root via the per-package Dockerfiles; the compose `build.context` is `..`.
+Images are prebuilt and published to GHCR on every commit to `main`: `ghcr.io/amaingot/kinora-server` and `ghcr.io/amaingot/kinora-web`, each tagged `latest` and `sha-<commit>` (multi-arch: amd64 + arm64). Set `KINORA_IMAGE_TAG` in `.env` to pin a commit.
+
+To build from source instead (e.g. to run an unmerged branch), layer the build override; the context
+is the repo root and compose tags the result with the same image names:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
 
 ## How it works
 
@@ -38,6 +46,7 @@ automatically (the `migrate` service) before the server starts.
 | ----------------------------------------------------- | -------- | -------------------------------------------------------------------------- |
 | `PUBLIC_URL`                                          | yes      | The URL users reach kinora at. Drives links, cookies, and artifact URLs.   |
 | `WEB_PORT`                                            | no       | Host port for the web container (default 8080). Match `PUBLIC_URL`.        |
+| `KINORA_IMAGE_TAG`                                    | no       | Image tag to run: `latest` (default) or a pinned `sha-<commit>`.           |
 | `AUTH_SECRET`                                         | yes      | Session secret. `openssl rand -hex 32`.                                    |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | yes      | Database credentials.                                                      |
 | `SMTP_*`                                              | no       | Enables email verification, password reset, invitations, and email alerts. |
@@ -99,17 +108,17 @@ Create the token in the dashboard under Settings -> Workspace. See the
 
 Set `PUBLIC_URL` to your public https URL (e.g. `https://kinora.example.com`) and put the web
 container behind your own TLS proxy (Caddy, Traefik, nginx, a load balancer, ...) forwarding to
-`WEB_PORT`. Rebuild the web image after changing `PUBLIC_URL` (it is baked at build time):
-`docker compose up -d --build web`.
+`WEB_PORT`. The dashboard calls the API on whatever origin it is served from, so changing
+`PUBLIC_URL` only needs `docker compose up -d` to restart the server with the new value.
 
 ## Upgrades
 
 ```bash
-git pull
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
 
-Migrations apply automatically on start.
+Migrations apply automatically on start. `git pull` is only needed when `docker-compose.yml` or
+`nginx.conf` change. To roll back, set `KINORA_IMAGE_TAG=sha-<commit>` in `.env` and repeat.
 
 ## Backups
 

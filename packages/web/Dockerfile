@@ -2,6 +2,8 @@
 # Build from the REPO ROOT (pnpm workspace):
 #   docker build -f packages/web/Dockerfile \
 #     --build-arg VITE_KINORA_SERVER_URL=https://api.kinora.dev -t kinora-web .
+# VITE_KINORA_SERVER_URL is optional: omit it (as the published self-host image does) and the
+# dashboard calls the API on its own origin, behind selfhost/nginx.conf.
 FROM node:26-alpine AS build
 RUN npm i -g corepack@latest && corepack enable
 WORKDIR /repo

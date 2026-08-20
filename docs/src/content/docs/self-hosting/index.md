@@ -15,7 +15,7 @@ repo:
 ```bash
 cp .env.example .env
 # edit at least: PUBLIC_URL, AUTH_SECRET, POSTGRES_PASSWORD
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
 
 Open `PUBLIC_URL` (default `http://localhost:8080`) and create your account. The first user owns
@@ -24,12 +24,18 @@ their workspace; invite teammates from Settings.
 ## What's in the bundle
 
 - `docker-compose.yml` - Postgres, a one-shot migrate, the server, and the web container.
+- `docker-compose.build.yml` - optional override to build the images from your checkout.
 - `nginx.conf` - the web container's reverse proxy: serves the dashboard + trace viewer and
   proxies the API to the server.
 - `.env.example` - all configuration.
 
-Images are built from the repo root via the per-package Dockerfiles; the compose `build.context`
-is `..`.
+Images are prebuilt and published to GHCR on every commit to `main`: `ghcr.io/amaingot/kinora-server` and `ghcr.io/amaingot/kinora-web`, each tagged `latest` and `sha-<commit>` (multi-arch: amd64 + arm64). Set `KINORA_IMAGE_TAG` in `.env` to pin a commit.
+
+To build from source instead (e.g. to run an unmerged branch), layer the build override:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
 
 ## How it works
 
@@ -60,14 +66,11 @@ Create the token in the dashboard under **Settings → Workspace**. See
 
 Set `PUBLIC_URL` to your public https URL (e.g. `https://kinora.example.com`) and put the web
 container behind your own TLS proxy (Caddy, Traefik, nginx, a load balancer) forwarding to
-`WEB_PORT`. `PUBLIC_URL` is baked into the web image at build time, so rebuild after changing it:
-
-```bash
-docker compose up -d --build web
-```
+`WEB_PORT`. The dashboard calls the API on whatever origin it is served from, so changing
+`PUBLIC_URL` only needs `docker compose up -d` to restart the server with the new value.
 
 ## Next
 
 - [Configuration](/self-hosting/configuration/): every `.env` variable.
 - [Storage & artifacts](/self-hosting/storage/): local volume vs S3-compatible store.
-- [Upgrading & backups](/self-hosting/upgrading/): pull, rebuild, and back up your volumes.
+- [Upgrading & backups](/self-hosting/upgrading/): pull new images, pin or roll back, and back up your volumes.

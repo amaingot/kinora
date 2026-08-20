@@ -1,12 +1,16 @@
 # kinora self-host: Postgres + server (local-FS artifacts) + web (single-origin reverse proxy).
 # Run from this directory:
 #   cp .env.example .env     # then edit PUBLIC_URL, AUTH_SECRET, POSTGRES_PASSWORD
-#   docker compose up -d --build
+#   docker compose pull && docker compose up -d
 #   open $PUBLIC_URL
 #
 # Everything is one origin: the web container serves the dashboard and proxies the API to the
 # server, so there's no CORS or cross-subdomain cookie setup. Artifacts live on a local volume
-# (no S3 needed). See README.md. Build context is the repo root (the images need the workspace).
+# (no S3 needed). See README.md.
+#
+# Images come prebuilt from GHCR (published by .github/workflows/docker.yml on every main commit;
+# pin one with KINORA_IMAGE_TAG=sha-<commit>). To build from source instead, layer the override:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 name: kinora-selfhost
 
 services:
@@ -27,9 +31,7 @@ services:
 
   # One-shot: apply migrations, then exit. The server waits for it to finish.
   migrate:
-    build:
-      context: ..
-      dockerfile: packages/server/Dockerfile
+    image: ghcr.io/amaingot/kinora-server:${KINORA_IMAGE_TAG:-latest}
     command: [node, dist/scripts/migrate.mjs, latest]
     env_file: .env
     environment:
@@ -41,9 +43,7 @@ services:
         condition: service_healthy
 
   server:
-    build:
-      context: ..
-      dockerfile: packages/server/Dockerfile
+    image: ghcr.io/amaingot/kinora-server:${KINORA_IMAGE_TAG:-latest}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -59,14 +59,10 @@ services:
         condition: service_completed_successfully
 
   web:
-    build:
-      context: ..
-      dockerfile: packages/web/Dockerfile
-      args:
-        # Baked at build: the public URL the browser uses (same origin as this container).
-        VITE_KINORA_SERVER_URL: ${PUBLIC_URL}
+    image: ghcr.io/amaingot/kinora-web:${KINORA_IMAGE_TAG:-latest}
     restart: unless-stopped
-    # Override the cloud (static-only) nginx with the self-host proxy config.
+    # Override the cloud (static-only) nginx with the self-host proxy config. The dashboard
+    # calls the API on its own origin, so the same image works for any PUBLIC_URL.
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:

@@ -1,23 +1,27 @@
 ---
 title: Upgrading & backups
-description: Pull the latest kinora, rebuild the stack, and back up your data volumes.
+description: Pull the latest kinora images, pin or roll back, and back up your data volumes.
 ---
 
 ## Upgrading
 
 ```bash
-git pull
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
 
 Migrations apply automatically on start (the one-shot `migrate` service runs before the server).
-There is no separate migration step to run.
+There is no separate migration step to run. `git pull` is only needed when `docker-compose.yml`
+or `nginx.conf` change.
 
-If you changed `PUBLIC_URL`, rebuild the web image specifically, since it is baked at build time:
+Images are published on every commit to `main` as `latest` and `sha-<commit>`. To pin a version
+or roll back, set the tag in `.env` and bring the stack up again:
 
 ```bash
-docker compose up -d --build web
+KINORA_IMAGE_TAG=sha-44b6925
 ```
+
+If you build from source (`docker-compose.build.yml`), add `--build` to the `up` command instead
+of pulling.
 
 ## Backups
 
