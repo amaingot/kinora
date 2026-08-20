@@ -14,8 +14,12 @@ metadata:
   labels: {{- include "kinora.componentLabels" (dict "ctx" . "component" "test") | nindent 4 }}
   annotations:
     helm.sh/hook: test
-    {{- /* succeeded-only deletion: a failed run leaves the pod behind for `kubectl logs`. */}}
-    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- /* before-hook-creation ONLY, deliberately. Adding hook-succeeded races
+         `helm test --logs`: Helm deletes the pod on success and then cannot read its logs
+         ("pods kinora-test not found"), so a passing test reports as a failure. Leaving the
+         pod behind keeps the output readable with `kubectl logs` either way, and the next
+         `helm test` cleans it up before creating its own. */}}
+    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   restartPolicy: Never
   {{- with .Values.imagePullSecrets }}
