@@ -22,6 +22,20 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().default(''),
   GITHUB_CLIENT_ID: z.string().default(''),
   GITHUB_CLIENT_SECRET: z.string().default(''),
+  // Generic OIDC SSO (self-host): any provider exposing a discovery document.
+  OIDC_ISSUER_URL: z.union([z.literal(''), z.url()]).default(''),
+  OIDC_CLIENT_ID: z.string().default(''),
+  OIDC_CLIENT_SECRET: z.string().default(''),
+  // Shown on the sign-in button: "Continue with <name>".
+  OIDC_PROVIDER_NAME: z.string().default('SSO'),
+  // Space- or comma-separated. `openid profile email` is the minimum: the callback rejects a
+  // sign-in missing email, sub or name.
+  OIDC_SCOPES: z.string().default('openid profile email'),
+  // Override when the document isn't at <issuer>/.well-known/openid-configuration.
+  OIDC_DISCOVERY_URL: z.union([z.literal(''), z.url()]).default(''),
+  OIDC_PKCE: z.stringbool().default(true),
+  // SSO-only installs: turn off email + password sign-in and sign-up entirely.
+  KINORA_DISABLE_PASSWORD_AUTH: z.stringbool().default(false),
   KINORA_CLOUD: z.stringbool().default(false),
   // Public demo instance: auto-session as the seeded demo user + read-only (no mutations/ingest/auth writes).
   KINORA_DEMO: z.stringbool().default(false),
@@ -61,6 +75,13 @@ const envSchema = z.object({
   // the two ports already share host-only cookies, so COOKIE_DOMAIN can stay empty there.
   e => !(e.KINORA_CLOUD && e.NODE_ENV === 'production') || Boolean(e.COOKIE_DOMAIN),
   { message: 'KINORA_CLOUD=true in production requires COOKIE_DOMAIN (e.g. .kinora.dev)' },
+).refine(
+  // Disabling password auth with no external provider configured would lock every user out.
+  e => !e.KINORA_DISABLE_PASSWORD_AUTH
+    || Boolean(e.OIDC_ISSUER_URL && e.OIDC_CLIENT_ID && e.OIDC_CLIENT_SECRET)
+    || Boolean(e.GOOGLE_CLIENT_ID && e.GOOGLE_CLIENT_SECRET)
+    || Boolean(e.GITHUB_CLIENT_ID && e.GITHUB_CLIENT_SECRET),
+  { message: 'KINORA_DISABLE_PASSWORD_AUTH=true requires OIDC_* or a social provider to be configured' },
 )
 
 export type Env = z.infer<typeof envSchema>
@@ -118,6 +139,44 @@ export const retentionPolicy = resolveRetention()
 // Social login is enabled per provider only when both its id and secret are set.
 export const googleOauthEnabled = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET)
 export const githubOauthEnabled = Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET)
+
+// Fixed, not env-configurable: it is also the callback path segment, the account.providerId value,
+// and what the dashboard's "Last used" badge compares against.
+export const OIDC_PROVIDER_ID = 'oidc'
+
+export interface OidcConfig {
+  issuerUrl: string
+  discoveryUrl: string
+  clientId: string
+  clientSecret: string
+  name: string
+  scopes: string[]
+  pkce: boolean
+}
+
+// Generic OIDC SSO; null unless issuer + id + secret are all set, mirroring the social providers.
+function resolveOidc(): OidcConfig | null {
+  const { OIDC_ISSUER_URL, OIDC_CLIENT_ID: clientId, OIDC_CLIENT_SECRET: clientSecret } = env
+  if (!OIDC_ISSUER_URL || !clientId || !clientSecret)
+    return null
+
+  const issuerUrl = OIDC_ISSUER_URL.replace(/\/+$/, '')
+  return {
+    issuerUrl,
+    // better-auth fetches this verbatim, so it must be the full document URL.
+    discoveryUrl: env.OIDC_DISCOVERY_URL || `${issuerUrl}/.well-known/openid-configuration`,
+    clientId,
+    clientSecret,
+    name: env.OIDC_PROVIDER_NAME,
+    scopes: env.OIDC_SCOPES.split(/[\s,]+/).filter(Boolean),
+    pkce: env.OIDC_PKCE,
+  }
+}
+
+export const oidc = resolveOidc()
+
+// SSO-only installs flip this off; the refine above guarantees a provider exists when they do.
+export const passwordAuthEnabled = !env.KINORA_DISABLE_PASSWORD_AUTH
 
 export interface S3Config {
   endpoint: string

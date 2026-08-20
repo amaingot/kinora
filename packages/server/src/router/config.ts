@@ -1,4 +1,4 @@
-import { cloud, demo, githubOauthEnabled, googleOauthEnabled, slackApp } from '../lib/env'
+import { cloud, demo, githubOauthEnabled, googleOauthEnabled, oidc, passwordAuthEnabled, slackApp } from '../lib/env'
 import { feedbackEnabled } from '../lib/feedback-tracker'
 import { mailerEnabled } from '../lib/mailer'
 import { publicProcedure, router } from '../trpc/index'
@@ -13,6 +13,11 @@ export const configRouter = router({
     // Social providers configured? front hides the button when not.
     googleOauthEnabled,
     githubOauthEnabled,
+    // Generic OIDC configured? front shows "Continue with <name>" as the first option.
+    oidcEnabled: oidc !== null,
+    oidcProviderName: oidc?.name ?? null,
+    // SSO-only install? front hides the email/password form and redirects signup/forgot to login.
+    passwordAuthEnabled,
     // Public read-only demo? front shows a banner + hides mutation UI.
     demo,
     // Feedback tracker configured (cloud)? front shows the "Send feedback" entry.

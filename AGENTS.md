@@ -83,6 +83,8 @@ A test result travels: **Playwright run -> reporter or CLI -> `@kinora/core` nor
 
 `auth.handler` serves better-auth's own routes at `/api/auth/*`; `/api/slack` is the Slack "Add to Slack" OAuth callback (`src/slack/oauth.ts`). Order in `app.ts` matters: `/artifacts/*` static serving with permissive CORS is registered _before_ `secureHeaders`/global CORS so its headers don't block the viewer's cross-origin service-worker fetch. `/api/v1/*` has a `bodyLimit` (large trace.zip uploads).
 
+Sign-in methods are all env-gated in `src/lib/auth.ts`: email+password, Google, GitHub, and a **generic OIDC provider** (better-auth's `genericOAuth` plugin, fixed `providerId: 'oidc'`, configured by `OIDC_*` and resolved by `resolveOidc()` in `env.ts`). OIDC is the self-host SSO story: users are provisioned just-in-time by the existing `databaseHooks.user.create.after` hook, and `account.accountLinking` trusts the provider so an existing email links rather than duplicating. `KINORA_DISABLE_PASSWORD_AUTH=true` turns email+password off entirely - note it must also *omit* `sendResetPassword`, since better-auth gates `/request-password-reset` on that callback existing rather than on `emailAndPassword.enabled`. The dashboard learns all of this from the public `config.get` tRPC query.
+
 The desktop app authenticates via the **OAuth 2.0 device authorization grant** (better-auth `deviceAuthorization` plugin in `src/lib/auth.ts`; client id `kinora-desktop`). The user approves at `WEB_ORIGIN/device` (a `meta.public` web route), and the app polls `/api/auth/device/token` for the bearer token. So treat device-grant as a third auth path on top of the two REST/tRPC surfaces.
 
 ### Cloud vs self-host, alerts, billing

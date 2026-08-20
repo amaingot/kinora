@@ -5,11 +5,12 @@ import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@kinor
 import { Input } from '@kinora/ui/input'
 import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { z } from 'zod'
 import AuthLayout from '@/components/auth/AuthLayout.vue'
 import SocialButtons from '@/components/auth/SocialButtons.vue'
+import { useServerConfig } from '@/composables/queries'
 import { authClient } from '@/lib/auth'
 import { session } from '@/lib/session'
 
@@ -17,6 +18,10 @@ const router = useRouter()
 const route = useRoute()
 const serverError = ref('')
 const lastMethod = authClient.getLastUsedLoginMethod()
+
+// SSO-only install: hide the credentials form and the (now unreachable) sign-up link.
+const { state: serverConfig } = useServerConfig()
+const passwordEnabled = computed(() => serverConfig.value?.passwordAuthEnabled ?? true)
 
 // Honor ?redirect= (e.g. an invite link); internal paths only.
 function destination(): string | { name: string } {
@@ -56,7 +61,7 @@ const labelClass = 'font-mono text-[11px] tracking-wider text-muted-foreground u
   <AuthLayout tag="Sign in to continue">
     <SocialButtons />
 
-    <form class="space-y-4" @submit="onSubmit">
+    <form v-if="passwordEnabled" class="space-y-4" @submit="onSubmit">
       <FormField v-slot="{ componentField }" name="email">
         <FormItem>
           <FormLabel :class="labelClass">
@@ -101,10 +106,12 @@ const labelClass = 'font-mono text-[11px] tracking-wider text-muted-foreground u
     </form>
 
     <template #footer>
-      No account?
-      <RouterLink :to="{ name: 'signup' }" class="font-medium text-foreground underline-offset-4 hover:underline">
-        Create one
-      </RouterLink>
+      <template v-if="passwordEnabled">
+        No account?
+        <RouterLink :to="{ name: 'signup' }" class="font-medium text-foreground underline-offset-4 hover:underline">
+          Create one
+        </RouterLink>
+      </template>
     </template>
   </AuthLayout>
 </template>

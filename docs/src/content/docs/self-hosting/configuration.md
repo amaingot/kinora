@@ -44,6 +44,45 @@ Leave empty to use email + password only.
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth. |
 
+## Single sign-on (OIDC, optional)
+
+Use your own identity provider - Okta, Keycloak, Entra ID, Authentik, Auth0, Google Workspace, or
+anything else that speaks OpenID Connect. Set the three required variables and restart; no rebuild
+is needed, the server reads them at boot.
+
+| Variable | Notes |
+| --- | --- |
+| `OIDC_ISSUER_URL` | Issuer URL, e.g. `https://sso.example.com/realms/acme`. Empty disables SSO. |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | Credentials for a **confidential** client. |
+| `OIDC_PROVIDER_NAME` | Button label: "Continue with ...". Defaults to `SSO`. |
+| `OIDC_SCOPES` | Defaults to `openid profile email`. The IdP must release `email`, `sub` and `name`. |
+| `OIDC_DISCOVERY_URL` | Only if the document isn't at `<issuer>/.well-known/openid-configuration`. |
+| `OIDC_PKCE` | Defaults to `true`. Turn off only for an IdP that can't do PKCE. |
+| `KINORA_DISABLE_PASSWORD_AUTH` | `true` turns off email + password entirely (SSO-only). |
+
+In your IdP, create a confidential client with this redirect URL:
+
+```
+${PUBLIC_URL}/api/auth/oauth2/callback/oidc
+```
+
+Worked example, Keycloak realm `acme` on `https://sso.example.com`:
+
+```bash
+OIDC_ISSUER_URL=https://sso.example.com/realms/acme
+OIDC_CLIENT_ID=kinora
+OIDC_CLIENT_SECRET=<from the Credentials tab>
+OIDC_PROVIDER_NAME=Acme SSO
+```
+
+Users are created **just-in-time** on first sign-in, each with their own workspace. If the email
+already belongs to a kinora account, the SSO identity links to that account rather than creating a
+duplicate - so existing users keep their projects when you switch to SSO.
+
+To require SSO, set `KINORA_DISABLE_PASSWORD_AUTH=true`. The server refuses to boot if no provider
+is configured, so a typo can't lock everyone out; recovery is editing `.env` and restarting. Note
+that invited teammates must then sign in through the IdP before accepting an invitation.
+
 ## Artifact storage (optional)
 
 Leave the `S3_*` variables empty to store `trace.zip` on a local volume (the default). Set all
