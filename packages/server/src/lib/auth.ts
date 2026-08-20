@@ -135,6 +135,12 @@ export const auth = betterAuth({
       },
     },
   },
+  // A provider error (user cancels at the IdP, or no `code` comes back) is handled before
+  // better-auth parses the state, so the client's errorCallbackURL can't reach it. Without this
+  // the user lands on the bare /api/auth/error backend page; send them to the dashboard instead.
+  onAPIError: {
+    errorURL: `${env.WEB_ORIGIN}/login`,
+  },
   advanced: {
     ...(env.COOKIE_DOMAIN ? { crossSubDomainCookies: { enabled: true, domain: env.COOKIE_DOMAIN } } : {}),
     // Demo runs on a *.kinora.dev subdomain next to prod; a distinct cookie name stops prod's

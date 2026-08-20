@@ -55,7 +55,7 @@ is needed, the server reads them at boot.
 | `OIDC_ISSUER_URL` | Issuer URL, e.g. `https://sso.example.com/realms/acme`. Empty disables SSO. |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | Credentials for a **confidential** client. |
 | `OIDC_PROVIDER_NAME` | Button label: "Continue with ...". Defaults to `SSO`. |
-| `OIDC_SCOPES` | Defaults to `openid profile email`. The IdP must release `email`, `sub` and `name`. |
+| `OIDC_SCOPES` | Defaults to `openid profile email`. The IdP must release `email` and `sub`; `name` is optional - kinora derives one from `preferred_username`, `given_name`, or the email local part. |
 | `OIDC_DISCOVERY_URL` | Only if the document isn't at `<issuer>/.well-known/openid-configuration`. |
 | `OIDC_PKCE` | Defaults to `true`. Turn off only for an IdP that can't do PKCE. |
 | `KINORA_DISABLE_PASSWORD_AUTH` | `true` turns off email + password entirely (SSO-only). |

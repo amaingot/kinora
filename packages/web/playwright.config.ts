@@ -11,6 +11,14 @@ const WEB_PORT = 5399
 const serverUrl = `http://localhost:${SERVER_PORT}`
 const baseURL = `http://localhost:${WEB_PORT}`
 
+// A second stack in SSO-only mode (KINORA_DISABLE_PASSWORD_AUTH=true + OIDC configured), because
+// the deployment mode is fixed at boot and can't be toggled per-test. Shares the kinora_e2e DB;
+// the sso-only specs never sign in, so the issuer below is never dialled.
+const SSO_SERVER_PORT = 3398
+const SSO_WEB_PORT = 5398
+const ssoServerUrl = `http://localhost:${SSO_SERVER_PORT}`
+const ssoBaseURL = `http://localhost:${SSO_WEB_PORT}`
+
 // Single source for the server URL; e2e helpers read it for direct tRPC probes.
 process.env.E2E_SERVER_URL = serverUrl
 
@@ -35,12 +43,26 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 120_000,
     },
+    {
+      // SSO-only: no social creds, so the login page renders the OIDC button and nothing else.
+      command: `PORT=${SSO_SERVER_PORT} BASE_URL=${ssoServerUrl} WEB_ORIGIN=${ssoBaseURL} POSTGRES_DB=kinora_e2e KINORA_CLOUD=false KINORA_DISABLE_PASSWORD_AUTH=true OIDC_ISSUER_URL=http://localhost:9/realms/e2e OIDC_CLIENT_ID=e2e OIDC_CLIENT_SECRET=e2e OIDC_PROVIDER_NAME='E2E SSO' pnpm --filter @kinora/server start`,
+      url: `${ssoServerUrl}/healthcheck`,
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+    {
+      command: `VITE_KINORA_SERVER_URL=${ssoServerUrl} pnpm --filter @kinora/web exec vite --port ${SSO_WEB_PORT} --strictPort`,
+      url: ssoBaseURL,
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
   ],
   use: {
     baseURL,
     trace: 'on-first-retry',
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: /sso-only\.spec\.ts/ },
+    { name: 'sso-only', use: { ...devices['Desktop Chrome'], baseURL: ssoBaseURL }, testMatch: /sso-only\.spec\.ts/ },
   ],
 })

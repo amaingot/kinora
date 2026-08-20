@@ -82,7 +82,7 @@ projects.
 | `OIDC_ISSUER_URL` | - | Issuer URL, e.g. `https://sso.example.com/realms/acme`. Empty disables SSO. |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | - | Credentials for a **confidential** client. |
 | `OIDC_PROVIDER_NAME` | `SSO` | Button label: "Continue with ...". |
-| `OIDC_SCOPES` | `openid profile email` | Space- or comma-separated. Sign-in fails if the IdP returns no `email`, `sub`, or `name`, so don't narrow these without reason. |
+| `OIDC_SCOPES` | `openid profile email` | Space- or comma-separated. Sign-in fails if the IdP returns no `email` or `sub`, so don't narrow these without reason. A `name` claim is optional - kinora falls back to `preferred_username`, `given_name`, or the email local part. |
 | `OIDC_DISCOVERY_URL` | *(derived)* | Only if the document isn't at `<issuer>/.well-known/openid-configuration`. |
 | `OIDC_PKCE` | `true` | Turn off only for an IdP that can't do PKCE. |
 | `KINORA_DISABLE_PASSWORD_AUTH` | `false` | `true` turns off email + password sign-in and sign-up entirely. |
@@ -94,8 +94,9 @@ the IdP before they can accept the invitation.
 
 **Troubleshooting.** A wrong `OIDC_ISSUER_URL` surfaces as a generic `400` on sign-in; the real
 cause (a failed discovery fetch) is in the server log. A sign-in that bounces back with
-`name_is_missing` or `email_is_missing` means the IdP isn't releasing that claim - fix the scope
-or claim mapping on the IdP side.
+`email_is_missing` means the IdP isn't releasing an `email` claim - fix the scope or claim mapping
+on the IdP side. A missing `name` claim is fine: kinora derives a display name from
+`preferred_username`, `given_name`, or the email local part.
 
 ## Email (SMTP, optional)
 

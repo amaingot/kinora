@@ -28,10 +28,15 @@ async function signIn(provider: Provider): Promise<void> {
   pending.value = provider
   // Honor ?redirect= (e.g. /device?user_code=…) so OAuth returns there, not the overview.
   const r = route.query.redirect
-  const callbackURL = typeof r === 'string' && r.startsWith('/') ? `${window.location.origin}${r}` : window.location.origin
+  const dest = typeof r === 'string' && r.startsWith('/') ? r : ''
+  const callbackURL = `${window.location.origin}${dest}`
+  // Send failures back to /login carrying the same destination, so a retry still lands on the
+  // invite or device-approval page rather than the overview. (Errors raised before better-auth
+  // parses the state - e.g. the user cancels at the IdP - are caught by the server's
+  // onAPIError.errorURL instead; this option is only reachable after the state is read.)
+  const errorCallbackURL = `${window.location.origin}/login${dest ? `?redirect=${encodeURIComponent(dest)}` : ''}`
   const { error } = provider === 'oidc'
-    // errorCallbackURL keeps a failed callback on /login instead of better-auth's bare error page.
-    ? await authClient.signIn.oauth2({ providerId: 'oidc', callbackURL, errorCallbackURL: `${window.location.origin}/login` })
+    ? await authClient.signIn.oauth2({ providerId: 'oidc', callbackURL, errorCallbackURL })
     : await authClient.signIn.social({ provider, callbackURL })
   if (error) {
     toast.error(error.message ?? `Could not sign in with ${provider === 'oidc' ? oidcName.value : provider}`)

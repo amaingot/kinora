@@ -85,8 +85,14 @@ router.beforeEach(async (to) => {
     // isLoading settles on success or error; isReady never flips on a failed config fetch.
     const { state: config, isLoading } = useServerConfig()
     await until(isLoading).toBe(false)
-    if (config.value?.passwordAuthEnabled === false)
-      return { name: 'login' }
+    if (config.value?.passwordAuthEnabled === false) {
+      // Keep ?redirect= (the invite page's "Create account" CTA carries the invitation there),
+      // otherwise a first-time SSO user lands on the overview and never accepts the invite.
+      const r = to.query.redirect
+      return typeof r === 'string' && r.startsWith('/')
+        ? { name: 'login', query: { redirect: r } }
+        : { name: 'login' }
+    }
   }
   // Invite acceptance handles both guest and authed states itself.
   if (to.meta.invite)

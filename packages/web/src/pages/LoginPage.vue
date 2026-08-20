@@ -23,6 +23,20 @@ const lastMethod = authClient.getLastUsedLoginMethod()
 const { state: serverConfig } = useServerConfig()
 const passwordEnabled = computed(() => serverConfig.value?.passwordAuthEnabled ?? true)
 
+// A failed OAuth/OIDC callback redirects here with ?error=; surface it rather than silently
+// showing a bare login page. Rendered outside the form so it's visible on SSO-only installs too.
+const OAUTH_ERRORS: Record<string, string> = {
+  access_denied: 'Sign-in was cancelled.',
+  email_is_missing: 'Your identity provider did not return an email address.',
+  account_not_linked: 'That email already belongs to an account signed up a different way.',
+}
+const callbackError = computed(() => {
+  const e = route.query.error
+  if (typeof e !== 'string' || !e)
+    return ''
+  return OAUTH_ERRORS[e] ?? `Sign-in failed (${e.replace(/_/g, ' ')}).`
+})
+
 // Honor ?redirect= (e.g. an invite link); internal paths only.
 function destination(): string | { name: string } {
   const r = route.query.redirect
@@ -59,6 +73,10 @@ const labelClass = 'font-mono text-[11px] tracking-wider text-muted-foreground u
 
 <template>
   <AuthLayout tag="Sign in to continue">
+    <p v-if="callbackError" class="mb-4 rounded-md border border-fail/30 bg-fail/10 px-3 py-2 text-xs text-fail">
+      {{ callbackError }}
+    </p>
+
     <SocialButtons />
 
     <form v-if="passwordEnabled" class="space-y-4" @submit="onSubmit">

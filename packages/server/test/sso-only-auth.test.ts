@@ -23,7 +23,7 @@ const { resetDb } = await import('./helpers')
 
 await resetDb()
 
-describe('sSO-only install', () => {
+describe('sso-only install', () => {
   it('refuses email sign-up and sign-in', async () => {
     await expect(auth.api.signUpEmail({
       body: { email: 'nope@acme.test', password: 'password123', name: 'Nope' },
