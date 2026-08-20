@@ -46,7 +46,8 @@ Two named volumes hold all state:
 
 - `kinora-db` - the Postgres database (projects, runs, tests, users).
 - `kinora-artifacts` - uploaded `trace.zip`, screenshots, and videos (when using local storage;
-  with an [S3 store](/self-hosting/storage/) the artifacts live in your bucket instead).
+  with an [S3 store](/self-hosting/storage/) the artifacts live in your bucket instead, so only
+  the database below is yours to back up).
 
 Back them up with your usual volume backup workflow, or `pg_dump` for the database:
 

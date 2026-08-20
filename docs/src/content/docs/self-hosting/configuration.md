@@ -89,12 +89,17 @@ that invited teammates must then sign in through the IdP before accepting an inv
 
 ## Artifact storage (optional)
 
-Leave the `S3_*` variables empty to store `trace.zip` on a local volume (the default). Set all
-five to use an S3-compatible store instead. See [Storage & artifacts](/self-hosting/storage/).
+Leave the `S3_*` variables empty to store `trace.zip` on a local volume (the default). Set the
+endpoint, region and bucket to use an S3-compatible store instead. See
+[Storage & artifacts](/self-hosting/storage/).
 
 | Variable | Notes |
 | --- | --- |
-| `S3_ENDPOINT` | S3-compatible endpoint URL. |
+| `S3_ENDPOINT` | S3-compatible endpoint URL. The **service** endpoint, not a bucket URL. |
 | `S3_REGION` | Region. |
 | `S3_BUCKET` | Bucket name. |
-| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | Credentials. |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | Credentials. Optional, both or neither - omit them to use the AWS default credential chain. |
+| `S3_FORCE_PATH_STYLE` | `true` (default) for `host/bucket/key`; `false` for the `bucket.host/key` style AWS prefers. |
+
+Endpoint, region and bucket are required together: a partial set stops the server from booting
+rather than silently falling back to the local volume.
