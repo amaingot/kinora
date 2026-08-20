@@ -1,0 +1,18 @@
+# Override: build the kinora images from this checkout instead of pulling them from GHCR.
+# Context is the repo root (the Dockerfiles need the pnpm workspace). Compose tags the result
+# with the `image:` name from docker-compose.yml, so nothing else changes.
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+services:
+  # Same image as server; building it in both would race on the tag, so migrate just reuses it.
+  migrate:
+    pull_policy: never
+
+  server:
+    build:
+      context: ..
+      dockerfile: packages/server/Dockerfile
+
+  web:
+    build:
+      context: ..
+      dockerfile: packages/web/Dockerfile

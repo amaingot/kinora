@@ -16,7 +16,9 @@ export default defineConfig({
     ValidateEnv({
       validator: 'standard',
       schema: {
-        VITE_KINORA_SERVER_URL: z.url(),
+        // Optional: unset/empty = same origin at runtime (the self-host image). Empty must pass too,
+        // because the Dockerfile mirrors an omitted build ARG as an empty ENV.
+        VITE_KINORA_SERVER_URL: z.url().or(z.literal('')).optional(),
         VITE_KINORA_VIEWER_URL: z.string().optional(),
         VITE_KINORA_CLOUD: z.string().optional(),
         VITE_KINORA_SENTRY_DSN: z.string().optional(),

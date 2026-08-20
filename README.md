@@ -171,7 +171,7 @@ Open http://localhost:5173 and sign in with the seeded credentials (`demo@kinora
 
 ## Self-hosting
 
-Run the whole stack with one `docker compose` (Postgres + server + dashboard, single origin, local-FS artifacts, no S3). See [`selfhost/README.md`](selfhost/README.md) for the quickstart, configuration, sending tests, custom domains, upgrades, and backups.
+Run the whole stack with one `docker compose` (Postgres + server + dashboard, single origin, local-FS artifacts, no S3), from the images published to GHCR on every `main` commit. See [`selfhost/README.md`](selfhost/README.md) for the quickstart, configuration, sending tests, custom domains, upgrades, and backups.
 
 ## Licensing
 
