@@ -58,14 +58,22 @@ server's own resolveOidc/resolveSmtp/resolveS3/resolveSlackApp gate themselves.
   value: {{ . | quote }}
 {{- end }}
 {{- if include "kinora.s3.enabled" . }}
-{{- /* resolveS3() is all-or-nothing: any missing value silently falls back to local disk, which
-     with no PVC means artifacts vanish on restart. validateValues enforces the full set. */}}
+{{- /* resolveS3() needs these three together and the server refuses to boot on a partial set;
+     validateValues catches it at render time instead. Credentials are NOT here - they travel
+     with the other secrets via envFrom, and may be absent entirely when the pod uses workload
+     identity, in which case the AWS SDK resolves them from its own provider chain. */}}
 - name: S3_ENDPOINT
   value: {{ .Values.storage.s3.endpoint | quote }}
 - name: S3_REGION
   value: {{ .Values.storage.s3.region | quote }}
 - name: S3_BUCKET
   value: {{ .Values.storage.s3.bucket | quote }}
+{{- if not .Values.storage.s3.forcePathStyle }}
+{{- /* Only emitted when non-default. Virtual-hosted style moves the presigned-URL origin to
+     <bucket>.<host>, which is why kinora.csp computes connect-src differently for it. */}}
+- name: S3_FORCE_PATH_STYLE
+  value: "false"
+{{- end }}
 {{- else }}
 {{- /* Absolute, unlike the app default ".data/artifacts", so STORAGE_DIR and the PVC mountPath
      are provably the same string. */}}

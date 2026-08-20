@@ -353,6 +353,9 @@
             },
             "secretAccessKey": {
               "type": "string"
+            },
+            "forcePathStyle": {
+              "type": "boolean"
             }
           }
         }

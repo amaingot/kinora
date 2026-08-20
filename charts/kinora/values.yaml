@@ -226,17 +226,27 @@ storage:
 
   s3:
     # -- Any S3-compatible store instead of a PersistentVolume: AWS S3, Cloudflare R2, MinIO,
-    # Hetzner. This is also what unlocks more than one server replica.
-    # ALL FIVE values are required - the server silently falls back to local disk if any one is
-    # missing, so the chart refuses to render a partial configuration instead of letting you
-    # find out later. Credentials may come from `secrets.*` instead of inline.
-    # The bucket needs CORS allowing `GET` and the `Range` header from `publicUrl`: the trace
-    # viewer's service worker range-fetches trace.zip straight from the browser.
+    # Hetzner. No PersistentVolumeClaim is created at all when this is set, and it is what
+    # unlocks more than one server replica.
+    # `endpoint`, `region` and `bucket` are required TOGETHER - the server refuses to boot on a
+    # partial set, and the chart refuses to render one.
+    # The bucket needs CORS allowing `GET` and the `Range` header from `publicUrl`, and must be
+    # reachable from your users browsers: the trace viewer's service worker range-fetches
+    # trace.zip straight from the browser, not through the server.
     endpoint: ''
     region: ''
     bucket: ''
+    # -- Static credentials. OPTIONAL, and set both or neither: leaving both empty uses the AWS
+    # SDK's default credential chain, which is how EKS IRSA, EKS Pod Identity and instance roles
+    # work - annotate `serviceAccount.annotations` instead of storing a key. May also come from
+    # `secrets.*` rather than inline.
     accessKeyId: ''
     secretAccessKey: ''
+    # -- Path-style URLs (`host/bucket/key`), which most S3-compatible providers (MinIO,
+    # Hetzner) require. Set false for the virtual-hosted style (`bucket.host/key`) that AWS
+    # prefers. This moves the origin of presigned artifact URLs, and the chart adjusts the
+    # dashboard's CSP `connect-src` to match.
+    forcePathStyle: true
 
 # =============================================================================================
 # Retention - THE DEFAULTS KEEP EVERYTHING FOREVER. Traces are what fill the disk.
@@ -620,7 +630,9 @@ serviceAccount:
   create: true
   name: ''
   annotations: {}
-  # -- kinora never talks to the Kubernetes API. Leave this off.
+  # -- kinora never talks to the Kubernetes API. Leave this off - it suppresses only the default
+  # kube-api-access volume, and does NOT interfere with workload identity: the EKS pod identity
+  # webhook projects its own separate token volume when it sees an IRSA annotation here.
   automountServiceAccountToken: false
 
 tests:

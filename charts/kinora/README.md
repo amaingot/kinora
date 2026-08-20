@@ -6,7 +6,7 @@ kinora tracks pass rates, trends and flaky tests across projects and over time, 
 full Playwright trace inline for any failure. This chart runs the whole thing on your own
 cluster: the API server, the dashboard, and - if you want it - the database.
 
-![Version: 0.1.1](https://img.shields.io/badge/Version-0.1.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.0](https://img.shields.io/badge/AppVersion-0.2.0-informational?style=flat-square)
+![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.0](https://img.shields.io/badge/AppVersion-0.2.0-informational?style=flat-square)
 
 ## TL;DR
 
@@ -167,12 +167,36 @@ server:
   replicaCount: 3
 ```
 
-All five values are required. The server treats a partial configuration as "no S3" and falls
-back to local disk without saying anything, so the chart refuses to render one instead.
+`endpoint`, `region` and `bucket` are required together - the server refuses to boot on a partial
+set, so the chart refuses to render one. **No PersistentVolumeClaim is created**: with S3
+configured, nothing about artifacts touches a disk inside the cluster.
 
-The bucket needs **CORS allowing `GET` and the `Range` header** from your `publicUrl`: the trace
-viewer's service worker range-fetches `trace.zip` straight from the browser. The chart adds the
-bucket's origin to the dashboard's `connect-src` for you.
+Credentials are optional. Leave both empty to use the pod's **workload identity** - the AWS SDK's
+default credential chain, which covers EKS IRSA, EKS Pod Identity and instance roles:
+
+```yaml
+storage:
+  local:
+    enabled: false
+  s3:
+    endpoint: https://s3.us-east-1.amazonaws.com
+    region: us-east-1
+    bucket: kinora-artifacts
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/kinora
+```
+
+Set both credentials or neither; one alone is refused at install time, because the server refuses
+to boot on it. `serviceAccount.automountServiceAccountToken: false` does **not** interfere - the
+EKS webhook projects its own separate token volume.
+
+The bucket needs **CORS allowing `GET` and the `Range` header** from your `publicUrl`, and must be
+reachable **from your users' browsers**: artifact URLs are presigned and the trace viewer's
+service worker range-fetches `trace.zip` straight from the browser, so an in-cluster-only endpoint
+cannot work. The chart adds the bucket's origin to the dashboard's `connect-src` for you - which
+is why `forcePathStyle` is a chart value rather than something you set on the server: flipping it
+moves that origin into the hostname, and the CSP follows.
 
 S3 is also what unlocks more than one server replica - see [Scaling](#scaling).
 
@@ -439,7 +463,7 @@ A kept PVC means a later re-install has to either delete it first or use
 | server.tolerations | list | `[]` |  |
 | server.topologySpreadConstraints | list | `[]` |  |
 | serviceAccount.annotations | object | `{}` |  |
-| serviceAccount.automountServiceAccountToken | bool | `false` | kinora never talks to the Kubernetes API. Leave this off. |
+| serviceAccount.automountServiceAccountToken | bool | `false` | kinora never talks to the Kubernetes API. Leave this off - it suppresses only the default kube-api-access volume, and does NOT interfere with workload identity: the EKS pod identity webhook projects its own separate token volume when it sees an IRSA annotation here. |
 | serviceAccount.create | bool | `true` |  |
 | serviceAccount.name | string | `""` |  |
 | slack.clientId | string | `""` | The "Add to Slack" OAuth app. Without it, Slack alerts fall back to a manually pasted incoming-webhook URL, which works perfectly well. |
@@ -457,9 +481,10 @@ A kept PVC means a later re-install has to either delete it first or use
 | storage.local.retainOnDelete | bool | `true` | Add `helm.sh/resource-policy: keep` so `helm uninstall` does not delete your traces. The trade-off: a later re-install must either delete the PVC first or use `helm install --take-ownership`. |
 | storage.local.size | string | `"50Gi"` |  |
 | storage.local.storageClass | string | `""` | Empty uses the cluster default StorageClass. |
-| storage.s3.accessKeyId | string | `""` |  |
+| storage.s3.accessKeyId | string | `""` | Static credentials. OPTIONAL, and set both or neither: leaving both empty uses the AWS SDK's default credential chain, which is how EKS IRSA, EKS Pod Identity and instance roles work - annotate `serviceAccount.annotations` instead of storing a key. May also come from `secrets.*` rather than inline. |
 | storage.s3.bucket | string | `""` |  |
-| storage.s3.endpoint | string | `""` | Any S3-compatible store instead of a PersistentVolume: AWS S3, Cloudflare R2, MinIO, Hetzner. This is also what unlocks more than one server replica. ALL FIVE values are required - the server silently falls back to local disk if any one is missing, so the chart refuses to render a partial configuration instead of letting you find out later. Credentials may come from `secrets.*` instead of inline. The bucket needs CORS allowing `GET` and the `Range` header from `publicUrl`: the trace viewer's service worker range-fetches trace.zip straight from the browser. |
+| storage.s3.endpoint | string | `""` | Any S3-compatible store instead of a PersistentVolume: AWS S3, Cloudflare R2, MinIO, Hetzner. No PersistentVolumeClaim is created at all when this is set, and it is what unlocks more than one server replica. `endpoint`, `region` and `bucket` are required TOGETHER - the server refuses to boot on a partial set, and the chart refuses to render one. The bucket needs CORS allowing `GET` and the `Range` header from `publicUrl`, and must be reachable from your users browsers: the trace viewer's service worker range-fetches trace.zip straight from the browser, not through the server. |
+| storage.s3.forcePathStyle | bool | `true` | Path-style URLs (`host/bucket/key`), which most S3-compatible providers (MinIO, Hetzner) require. Set false for the virtual-hosted style (`bucket.host/key`) that AWS prefers. This moves the origin of presigned artifact URLs, and the chart adjusts the dashboard's CSP `connect-src` to match. |
 | storage.s3.region | string | `""` |  |
 | storage.s3.secretAccessKey | string | `""` |  |
 | tests.enabled | bool | `true` | Ship the `helm test` hook. Costs nothing unless you run `helm test`, and it is the only check that catches an install which is green but has no working API proxy. |
