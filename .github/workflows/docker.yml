@@ -36,6 +36,8 @@ jobs:
       fail-fast: false
       matrix:
         image: [server, web]
+        platform: [linux/amd64, linux/arm64]
+        # include only maps each platform axis value to its native runner.
         include:
           - platform: linux/amd64
             runner: ubuntu-latest
