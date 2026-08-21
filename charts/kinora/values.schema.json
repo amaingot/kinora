@@ -497,6 +497,18 @@
             }
           }
         },
+        "serviceAccount": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "annotations": {
+              "type": "object"
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        },
         "resources": {
           "type": "object"
         },

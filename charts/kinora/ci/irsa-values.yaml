@@ -19,8 +19,10 @@ storage:
     # Virtual-hosted style, so the presigned-URL origin is kinora-artifacts.s3.us-east-1...
     # and the dashboard's CSP connect-src has to name that host rather than the endpoint.
     forcePathStyle: false
-serviceAccount:
-  annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/kinora
 server:
   replicaCount: 3
+  # The role goes on the SERVER's own ServiceAccount, never the shared one - the web and
+  # Postgres pods run under that, and neither has any business holding S3 credentials.
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/kinora

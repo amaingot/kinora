@@ -118,25 +118,56 @@ request header and *exposes* the response headers a partial response carries - w
 even though the dashboard works perfectly.
 
 ```json
-[
-  {
-    "AllowedOrigins": ["https://kinora.example.com"],
-    "AllowedMethods": ["GET", "HEAD"],
-    "AllowedHeaders": ["*"],
-    "ExposeHeaders": ["Content-Range", "Content-Length", "Accept-Ranges", "ETag"],
-    "MaxAgeSeconds": 3000
-  }
-]
+{
+  "CORSRules": [
+    {
+      "AllowedOrigins": ["https://kinora.example.com"],
+      "AllowedMethods": ["GET", "HEAD"],
+      "AllowedHeaders": ["*"],
+      "ExposeHeaders": ["Content-Range", "Content-Length", "Accept-Ranges", "ETag"],
+      "MaxAgeSeconds": 3000
+    }
+  ]
+}
 ```
 
-`AllowedOrigins` is your `PUBLIC_URL` (or the chart's `publicUrl`). Apply it once:
+`AllowedOrigins` is your `PUBLIC_URL` (or the chart's `publicUrl`). Apply it once.
+
+**AWS S3:**
 
 ```bash
-# AWS S3, Cloudflare R2, Hetzner, any S3 API
 aws s3api put-bucket-cors --bucket kinora-artifacts --cors-configuration file://cors.json
+```
 
-# MinIO
-mc cors set myminio/kinora-artifacts cors.json
+**Another S3-compatible provider** (Cloudflare R2, Hetzner, MinIO) - the same command, but point
+the CLI at your endpoint or it will talk to AWS instead:
+
+```bash
+aws s3api put-bucket-cors --endpoint-url "$S3_ENDPOINT" \
+  --bucket kinora-artifacts --cors-configuration file://cors.json
+```
+
+**MinIO via `mc`** takes the S3 CORS *XML* document rather than the JSON above, so keep a second
+copy of the policy in this form:
+
+```xml
+<CORSConfiguration>
+  <CORSRule>
+    <AllowedOrigin>https://kinora.example.com</AllowedOrigin>
+    <AllowedMethod>GET</AllowedMethod>
+    <AllowedMethod>HEAD</AllowedMethod>
+    <AllowedHeader>*</AllowedHeader>
+    <ExposeHeader>Content-Range</ExposeHeader>
+    <ExposeHeader>Content-Length</ExposeHeader>
+    <ExposeHeader>Accept-Ranges</ExposeHeader>
+    <ExposeHeader>ETag</ExposeHeader>
+    <MaxAgeSeconds>3000</MaxAgeSeconds>
+  </CORSRule>
+</CORSConfiguration>
+```
+
+```bash
+mc cors set myminio/kinora-artifacts cors.xml
 ```
 
 ### Gotchas

@@ -238,8 +238,8 @@ storage:
     bucket: ''
     # -- Static credentials. OPTIONAL, and set both or neither: leaving both empty uses the AWS
     # SDK's default credential chain, which is how EKS IRSA, EKS Pod Identity and instance roles
-    # work - annotate `serviceAccount.annotations` instead of storing a key. May also come from
-    # `secrets.*` rather than inline.
+    # work - annotate `server.serviceAccount.annotations` instead of storing a key. May also
+    # come from `secrets.*` rather than inline.
     accessKeyId: ''
     secretAccessKey: ''
     # -- Path-style URLs (`host/bucket/key`), which most S3-compatible providers (MinIO,
@@ -352,6 +352,22 @@ server:
     port: 3000
     annotations: {}
     nodePort: null
+
+  serviceAccount:
+    # -- Annotations for the server's OWN ServiceAccount - `<serviceAccount.name>-server`,
+    # created alongside the shared one whenever `serviceAccount.create` is on. **This is where
+    # workload identity goes**, not `serviceAccount.annotations`: the server is the only
+    # workload that touches the S3 bucket, and the shared account is also assigned to the
+    # internet-facing web pod and to Postgres. The migrate initContainer shares the server's
+    # pod, so it is covered too.
+    annotations: {}
+    #  eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/kinora
+    #  iam.gke.io/gcp-service-account: kinora@project.iam.gserviceaccount.com
+    #  azure.workload.identity/client-id: 00000000-0000-0000-0000-000000000000
+    # -- Run the server under a ServiceAccount you create yourself (an IRSA controller,
+    # Terraform) instead of the chart's. Suppresses the server account above, so put your
+    # annotations on your own object.
+    name: ''
 
   resources:
     requests:
@@ -627,12 +643,22 @@ commonLabels: {}
 commonAnnotations: {}
 
 serviceAccount:
+  # -- Create the chart's ServiceAccounts: one shared by the web and Postgres pods, and one for
+  # the server (`server.serviceAccount`). The split exists so a cloud identity granted to the
+  # server is not also handed to the public web tier and the database.
   create: true
+  # -- Name of the shared account; the server's is this plus `-server`. Empty uses the release
+  # fullname. With `create: false` this names an account you manage yourself, and every pod
+  # falls back to it unless `server.serviceAccount.name` says otherwise.
   name: ''
+  # -- Annotations for BOTH accounts, for chart-wide things like ArgoCD sync waves. Workload
+  # identity is refused here and belongs on `server.serviceAccount.annotations` - a role
+  # annotated here would be injected into the web and Postgres containers as well.
   annotations: {}
   # -- kinora never talks to the Kubernetes API. Leave this off - it suppresses only the default
   # kube-api-access volume, and does NOT interfere with workload identity: the EKS pod identity
-  # webhook projects its own separate token volume when it sees an IRSA annotation here.
+  # webhook projects its own separate token volume when it sees an IRSA annotation on the
+  # server's account.
   automountServiceAccountToken: false
 
 tests:

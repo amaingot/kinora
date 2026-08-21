@@ -69,11 +69,13 @@ opens a trace, because the viewer's service worker fetches it straight from the 
 {{- if not (include "kinora.hasSecret" (dict "ctx" . "key" "S3_ACCESS_KEY_ID" "inline" .Values.storage.s3.accessKeyId)) }}
 
 No static S3 credentials were configured, so the server will use the AWS SDK's default
-credential chain. On EKS that means the ServiceAccount needs a role:
+credential chain. On EKS that means the server's ServiceAccount
+({{ include "kinora.server.serviceAccountName" . }}) needs a role:
 
-  serviceAccount:
-    annotations:
-      eks.amazonaws.com/role-arn: arn:aws:iam::<account>:role/<role>
+  server:
+    serviceAccount:
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::<account>:role/<role>
 
 Without one, this surfaces as CredentialsProviderError on the first artifact upload - not at
 startup, so a green install proves nothing here. Upload a run and check the server logs.

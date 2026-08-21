@@ -29,9 +29,14 @@ commonAnnotations:
 imagePullSecrets:
   - name: ghcr-pull
 serviceAccount:
+  # Chart-wide annotations reach every ServiceAccount the chart creates. Workload identity is
+  # NOT one of them - it is refused here and belongs on server.serviceAccount.annotations.
   annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/kinora
+    argocd.argoproj.io/sync-wave: '-1'
 server:
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/kinora
   autoscaling:
     enabled: true
     targetMemoryUtilizationPercentage: 80
