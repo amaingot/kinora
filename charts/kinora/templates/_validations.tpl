@@ -71,6 +71,24 @@ that cannot see inside their Secret.
 {{- end }}
 {{- end }}
 
+{{- /* Workload identity on the SHARED account would inject the S3 role's credentials into the
+     internet-facing web pod and into the Postgres container as well - both run under that
+     account, and neither has any use for GetObject/PutObject/DeleteObject. This is silent: the
+     install is green and S3 works, it is just over-granted. Fail with the one-line move. */}}
+{{- $identityAnnotations := list "eks.amazonaws.com/role-arn" "eks.amazonaws.com/audience" "iam.gke.io/gcp-service-account" "azure.workload.identity/client-id" "azure.workload.identity/tenant-id" }}
+{{- range $key, $value := .Values.serviceAccount.annotations }}
+{{- if has $key $identityAnnotations }}
+{{- fail (printf "\nkinora: %s belongs on server.serviceAccount.annotations, not serviceAccount.annotations.\n\nserviceAccount.annotations lands on the account the WEB and POSTGRES pods also run under, so\na role annotated there is injected into the public web tier and the database container too.\nOnly the server touches the artifact bucket. Move it:\n\n  server:\n    serviceAccount:\n      annotations:\n        %s: %s\n" $key $key $value) }}
+{{- end }}
+{{- end }}
+{{- /* ...and the mirror image: annotations aimed at a server account the chart is not creating
+     would vanish without a trace, taking the pod's credentials with them. */}}
+{{- if .Values.server.serviceAccount.annotations }}
+{{- if not (include "kinora.server.serviceAccount.create" .) }}
+{{- fail (printf "\nkinora: server.serviceAccount.annotations is set but the chart is not creating that account.\n\nIt is suppressed by %s, so the annotations would be dropped and the\nserver would fall back to %q. Put them on the ServiceAccount you manage\nyourself, or let the chart create one.\n" (ternary "server.serviceAccount.name" "serviceAccount.create=false" (not (empty .Values.server.serviceAccount.name))) (include "kinora.server.serviceAccountName" .)) }}
+{{- end }}
+{{- end }}
+
 {{- if .Values.auth.oidc.issuerUrl }}
 {{- if not .Values.auth.oidc.clientId }}
 {{- fail "\nkinora: auth.oidc.issuerUrl is set but auth.oidc.clientId is empty.\n\nresolveOidc() needs issuerUrl + clientId + clientSecret; with any missing, SSO is silently\noff and the sign-in button never appears.\n" }}

@@ -97,6 +97,7 @@ jobs:
             fail_expected "smtp.host without from"        $base --set smtp.host=smtp.example.com
             fail_expected "httpRoute without parentRefs"  $base --set httpRoute.enabled=true
             fail_expected "no storage at all"             $base --set storage.local.enabled=false
+            fail_expected "IRSA on the shared ServiceAccount" $base --set 'serviceAccount.annotations.eks\.amazonaws\.com/role-arn=arn:aws:iam::111122223333:role/kinora'
           }
           # ...and the escape hatches must NOT be blocked by those guards.
           helm template kinora "$CHART_DIR" -f "$CHART_DIR/ci/existing-secret-values.yaml" >/dev/null
@@ -141,12 +142,65 @@ jobs:
           forbid "$irsa" 'volumeClaimTemplates' 'a volumeClaimTemplate'
           # The keyless preset's whole point is that no key is stored anywhere.
           forbid "$irsa" 'S3_ACCESS_KEY_ID|S3_SECRET_ACCESS_KEY' 'a static S3 credential'
-          require "$irsa" 'eks.amazonaws.com/role-arn' 'the IRSA ServiceAccount annotation'
           # Virtual-hosted style moves the presigned-URL origin into the hostname. If connect-src
           # still named the bare endpoint, every trace would be CSP-blocked in the browser with no
           # server-side signal at all.
           require "$irsa" 'kinora-artifacts\.s3\.us-east-1\.amazonaws\.com' 'the bucket origin in connect-src'
           require /tmp/manifests/default-values.yaml '^kind: PersistentVolumeClaim' 'an artifact PVC (guard is not vacuous)'
+          exit $fail
+
+      # Where the workload-identity annotation lands is the whole of its blast radius: EKS injects
+      # the role's credentials into every container running under the account that carries it. On
+      # a single shared account that silently hands GetObject/PutObject/DeleteObject to the
+      # internet-facing web tier and to the database container. Nothing about such an install
+      # looks wrong - S3 works either way - so only this assertion catches a regression.
+      - name: Workload identity must be scoped to the server
+        run: |
+          fail=0
+          # One line per rendered document: "<kind>/<name> <serviceAccountName|-> <ROLE|->".
+          summarise() {
+            awk 'BEGIN { RS = "\n---\n" }
+              {
+                kind = ""; name = ""; sa = "-"; role = "-"
+                n = split($0, line, "\n")
+                for (i = 1; i <= n; i++) {
+                  if (line[i] ~ /^kind: /) { kind = substr(line[i], 7) }
+                  else if (name == "" && line[i] ~ /^  name: /) { name = substr(line[i], 9) }
+                  else if (line[i] ~ /^      serviceAccountName: /) { sa = substr(line[i], 27) }
+                  else if (line[i] ~ /(eks\.amazonaws\.com\/role-arn|iam\.gke\.io\/gcp-service-account|azure\.workload\.identity\/client-id)/) { role = "ROLE" }
+                }
+                if (kind != "") { print kind "/" name, sa, role }
+              }' "$1"
+          }
+          # Both presets annotate for workload identity; kitchen-sink also runs the bundled
+          # Postgres, so between them every workload the chart ships is covered.
+          for f in /tmp/manifests/irsa-values.yaml /tmp/manifests/kitchen-sink-values.yaml; do
+            summary=$(summarise "$f")
+            annotated=$(echo "$summary" | awk '$3 == "ROLE" { print $1 }')
+            if [ "$annotated" = "ServiceAccount/kinora-server" ]; then
+              echo "ok: $(basename "$f") annotates the server's ServiceAccount and nothing else"
+            else
+              echo "::error::$(basename "$f"): the workload-identity annotation must be on ServiceAccount/kinora-server and nowhere else, but it is on: ${annotated:-nothing}"
+              fail=1
+            fi
+            borrowers=$(echo "$summary" | awk '$2 == "kinora-server" { print $1 }')
+            if [ "$borrowers" = "Deployment/kinora-server" ]; then
+              echo "ok: $(basename "$f") runs only the server under that account"
+            else
+              echo "::error::$(basename "$f"): only the server Deployment may run under kinora-server, but so does: ${borrowers:-nothing}"
+              fail=1
+            fi
+          done
+          # Naming the other two workloads explicitly keeps the checks above from passing
+          # vacuously if a workload ever stops rendering. "-" is the un-annotated column.
+          for w in "Deployment/kinora-web" "StatefulSet/kinora-postgres"; do
+            if summarise /tmp/manifests/kitchen-sink-values.yaml | grep -qx "$w kinora -"; then
+              echo "ok: $w is on the shared account, not the server's"
+            else
+              echo "::error::$w must run under the shared ServiceAccount 'kinora'"
+              fail=1
+            fi
+          done
           exit $fail
 
       - name: Install kubeconform

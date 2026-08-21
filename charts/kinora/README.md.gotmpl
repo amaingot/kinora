@@ -182,10 +182,19 @@ storage:
     endpoint: https://s3.us-east-1.amazonaws.com
     region: us-east-1
     bucket: kinora-artifacts
-serviceAccount:
-  annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/kinora
+server:
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/kinora
 ```
+
+Note `server.serviceAccount.annotations`, **not** `serviceAccount.annotations`. The chart creates
+two ServiceAccounts: one shared by the web and Postgres pods, and `<name>-server` for the server -
+the only workload that touches the bucket. Annotating the shared one would hand the same
+`GetObject`/`PutObject`/`DeleteObject` role to the internet-facing web tier and to the database
+container, so the chart refuses to render a workload-identity annotation there. The server's
+`migrate` initContainer shares its pod and is covered by the same account. If you create the
+ServiceAccount yourself, point `server.serviceAccount.name` at it and annotate your own object.
 
 Set both credentials or neither; one alone is refused at install time, because the server refuses
 to boot on it. `serviceAccount.automountServiceAccountToken: false` does **not** interfere - the

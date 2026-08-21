@@ -47,11 +47,37 @@
 {{- end -}}
 {{- end -}}
 
+{{- /* The shared account, used by the web and Postgres pods. Neither talks to a cloud API, so
+     nothing that grants credentials belongs on it - see kinora.server.serviceAccountName. */}}
 {{- define "kinora.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
 {{- default (include "kinora.fullname" .) .Values.serviceAccount.name -}}
 {{- else -}}
 {{- default "default" .Values.serviceAccount.name -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* The server is the only workload with a reason to hold a cloud identity: it is what reads
+     and writes the S3 artifact bucket. So it gets an account of its own, and the workload
+     identity annotation goes there rather than on the shared one - otherwise EKS (or GKE, or
+     Azure) injects the same S3 credentials into the internet-facing web tier and into the
+     database container, both of which have no use for GetObject/PutObject/DeleteObject.
+
+     The migrate initContainer shares the server's pod, so it is covered by this account too.
+
+     Named off the shared account rather than the release, so `serviceAccount.name: foo` yields
+     the matching pair foo (web + postgres) and foo-server. */}}
+{{- define "kinora.server.serviceAccount.create" -}}
+{{- if and .Values.serviceAccount.create (not .Values.server.serviceAccount.name) -}}true{{- end -}}
+{{- end -}}
+
+{{- define "kinora.server.serviceAccountName" -}}
+{{- if .Values.server.serviceAccount.name -}}
+{{- .Values.server.serviceAccount.name -}}
+{{- else if .Values.serviceAccount.create -}}
+{{- printf "%s-server" (include "kinora.serviceAccountName" .) | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- include "kinora.serviceAccountName" . -}}
 {{- end -}}
 {{- end -}}
 
