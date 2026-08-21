@@ -6,7 +6,7 @@ kinora tracks pass rates, trends and flaky tests across projects and over time, 
 full Playwright trace inline for any failure. This chart runs the whole thing on your own
 cluster: the API server, the dashboard, and - if you want it - the database.
 
-![Version: 0.1.1](https://img.shields.io/badge/Version-0.1.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.0](https://img.shields.io/badge/AppVersion-0.2.0-informational?style=flat-square)
+![Version: 0.2.1](https://img.shields.io/badge/Version-0.2.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.0](https://img.shields.io/badge/AppVersion-0.2.0-informational?style=flat-square)
 
 ## TL;DR
 
@@ -167,12 +167,45 @@ server:
   replicaCount: 3
 ```
 
-All five values are required. The server treats a partial configuration as "no S3" and falls
-back to local disk without saying anything, so the chart refuses to render one instead.
+`endpoint`, `region` and `bucket` are required together - the server refuses to boot on a partial
+set, so the chart refuses to render one. **No PersistentVolumeClaim is created**: with S3
+configured, nothing about artifacts touches a disk inside the cluster.
 
-The bucket needs **CORS allowing `GET` and the `Range` header** from your `publicUrl`: the trace
-viewer's service worker range-fetches `trace.zip` straight from the browser. The chart adds the
-bucket's origin to the dashboard's `connect-src` for you.
+Credentials are optional. Leave both empty to use the pod's **workload identity** - the AWS SDK's
+default credential chain, which covers EKS IRSA, EKS Pod Identity and instance roles:
+
+```yaml
+storage:
+  local:
+    enabled: false
+  s3:
+    endpoint: https://s3.us-east-1.amazonaws.com
+    region: us-east-1
+    bucket: kinora-artifacts
+server:
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/kinora
+```
+
+Note `server.serviceAccount.annotations`, **not** `serviceAccount.annotations`. The chart creates
+two ServiceAccounts: one shared by the web and Postgres pods, and `<name>-server` for the server -
+the only workload that touches the bucket. Annotating the shared one would hand the same
+`GetObject`/`PutObject`/`DeleteObject` role to the internet-facing web tier and to the database
+container, so the chart refuses to render a workload-identity annotation there. The server's
+`migrate` initContainer shares its pod and is covered by the same account. If you create the
+ServiceAccount yourself, point `server.serviceAccount.name` at it and annotate your own object.
+
+Set both credentials or neither; one alone is refused at install time, because the server refuses
+to boot on it. `serviceAccount.automountServiceAccountToken: false` does **not** interfere - the
+EKS webhook projects its own separate token volume.
+
+The bucket needs **CORS allowing `GET` and the `Range` header** from your `publicUrl`, and must be
+reachable **from your users' browsers**: artifact URLs are presigned and the trace viewer's
+service worker range-fetches `trace.zip` straight from the browser, so an in-cluster-only endpoint
+cannot work. The chart adds the bucket's origin to the dashboard's `connect-src` for you - which
+is why `forcePathStyle` is a chart value rather than something you set on the server: flipping it
+moves that origin into the hostname, and the CSP follows.
 
 S3 is also what unlocks more than one server replica - see [Scaling](#scaling).
 
@@ -431,6 +464,8 @@ A kept PVC means a later re-install has to either delete it first or use
 | server.service.nodePort | string | `nil` |  |
 | server.service.port | int | `3000` | Also the port the web pod's nginx proxies to. |
 | server.service.type | string | `"ClusterIP"` |  |
+| server.serviceAccount.annotations | object | `{}` | Annotations for the server's OWN ServiceAccount - `<serviceAccount.name>-server`, created alongside the shared one whenever `serviceAccount.create` is on. **This is where workload identity goes**, not `serviceAccount.annotations`: the server is the only workload that touches the S3 bucket, and the shared account is also assigned to the internet-facing web pod and to Postgres. The migrate initContainer shares the server's pod, so it is covered too. |
+| server.serviceAccount.name | string | `""` | Run the server under a ServiceAccount you create yourself (an IRSA controller, Terraform) instead of the chart's. Suppresses the server account above, so put your annotations on your own object. |
 | server.sidecars | list | `[]` | Extra containers in the server pod. The intended use is a database proxy on 127.0.0.1 (cloud-sql-proxy, pgbouncer, stunnel) for a managed database that needs more than `postgres.sslMode` can express. |
 | server.startupProbe.enabled | bool | `false` |  |
 | server.startupProbe.failureThreshold | int | `30` |  |
@@ -438,10 +473,10 @@ A kept PVC means a later re-install has to either delete it first or use
 | server.terminationGracePeriodSeconds | int | `30` | The server closes its HTTP listener and drains the pg pool on SIGTERM, hard-exiting after 10s. |
 | server.tolerations | list | `[]` |  |
 | server.topologySpreadConstraints | list | `[]` |  |
-| serviceAccount.annotations | object | `{}` |  |
-| serviceAccount.automountServiceAccountToken | bool | `false` | kinora never talks to the Kubernetes API. Leave this off. |
-| serviceAccount.create | bool | `true` |  |
-| serviceAccount.name | string | `""` |  |
+| serviceAccount.annotations | object | `{}` | Annotations for BOTH accounts, for chart-wide things like ArgoCD sync waves. Workload identity is refused here and belongs on `server.serviceAccount.annotations` - a role annotated here would be injected into the web and Postgres containers as well. |
+| serviceAccount.automountServiceAccountToken | bool | `false` | kinora never talks to the Kubernetes API. Leave this off - it suppresses only the default kube-api-access volume, and does NOT interfere with workload identity: the EKS pod identity webhook projects its own separate token volume when it sees an IRSA annotation on the server's account. |
+| serviceAccount.create | bool | `true` | Create the chart's ServiceAccounts: one shared by the web and Postgres pods, and one for the server (`server.serviceAccount`). The split exists so a cloud identity granted to the server is not also handed to the public web tier and the database. |
+| serviceAccount.name | string | `""` | Name of the shared account; the server's is this plus `-server`. Empty uses the release fullname. With `create: false` this names an account you manage yourself, and every pod falls back to it unless `server.serviceAccount.name` says otherwise. |
 | slack.clientId | string | `""` | The "Add to Slack" OAuth app. Without it, Slack alerts fall back to a manually pasted incoming-webhook URL, which works perfectly well. |
 | slack.clientSecret | string | `""` |  |
 | smtp.from | string | `""` | e.g. `kinora <no-reply@example.com>` |
@@ -457,9 +492,10 @@ A kept PVC means a later re-install has to either delete it first or use
 | storage.local.retainOnDelete | bool | `true` | Add `helm.sh/resource-policy: keep` so `helm uninstall` does not delete your traces. The trade-off: a later re-install must either delete the PVC first or use `helm install --take-ownership`. |
 | storage.local.size | string | `"50Gi"` |  |
 | storage.local.storageClass | string | `""` | Empty uses the cluster default StorageClass. |
-| storage.s3.accessKeyId | string | `""` |  |
+| storage.s3.accessKeyId | string | `""` | Static credentials. OPTIONAL, and set both or neither: leaving both empty uses the AWS SDK's default credential chain, which is how EKS IRSA, EKS Pod Identity and instance roles work - annotate `server.serviceAccount.annotations` instead of storing a key. May also come from `secrets.*` rather than inline. |
 | storage.s3.bucket | string | `""` |  |
-| storage.s3.endpoint | string | `""` | Any S3-compatible store instead of a PersistentVolume: AWS S3, Cloudflare R2, MinIO, Hetzner. This is also what unlocks more than one server replica. ALL FIVE values are required - the server silently falls back to local disk if any one is missing, so the chart refuses to render a partial configuration instead of letting you find out later. Credentials may come from `secrets.*` instead of inline. The bucket needs CORS allowing `GET` and the `Range` header from `publicUrl`: the trace viewer's service worker range-fetches trace.zip straight from the browser. |
+| storage.s3.endpoint | string | `""` | Any S3-compatible store instead of a PersistentVolume: AWS S3, Cloudflare R2, MinIO, Hetzner. No PersistentVolumeClaim is created at all when this is set, and it is what unlocks more than one server replica. `endpoint`, `region` and `bucket` are required TOGETHER - the server refuses to boot on a partial set, and the chart refuses to render one. The bucket needs CORS allowing `GET` and the `Range` header from `publicUrl`, and must be reachable from your users browsers: the trace viewer's service worker range-fetches trace.zip straight from the browser, not through the server. |
+| storage.s3.forcePathStyle | bool | `true` | Path-style URLs (`host/bucket/key`), which most S3-compatible providers (MinIO, Hetzner) require. Set false for the virtual-hosted style (`bucket.host/key`) that AWS prefers. This moves the origin of presigned artifact URLs, and the chart adjusts the dashboard's CSP `connect-src` to match. |
 | storage.s3.region | string | `""` |  |
 | storage.s3.secretAccessKey | string | `""` |  |
 | tests.enabled | bool | `true` | Ship the `helm test` hook. Costs nothing unless you run `helm test`, and it is the only check that catches an install which is green but has no working API proxy. |

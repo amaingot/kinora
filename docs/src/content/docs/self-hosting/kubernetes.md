@@ -115,12 +115,46 @@ Leave both off to bring your own load balancer, and point it at the `kinora-web`
   usually `no-verify` for managed providers, whose CAs are not in Node's default bundle.
 - **Set retention.** The defaults keep every run and every trace forever. `retention.artifactDays: 30`
   drops old trace files while keeping all your history and trends.
-- **Consider S3.** It is also what lets you run more than one server replica - with artifacts on
-  a ReadWriteOnce volume the chart pins the server to one, because `/artifacts` is served from
-  whichever replica the Service picks.
+- **Consider S3.** See [Artifact storage](#artifact-storage) below. It is also what lets you run
+  more than one server replica.
 - **Check the trace viewer, not just the dashboard.** `helm test` does this for you.
 
-See [Storage & artifacts](/self-hosting/storage/) for the S3 bucket CORS requirement.
+## Artifact storage
+
+By default the chart puts `trace.zip` on a `ReadWriteOnce` PersistentVolumeClaim
+(`storage.local`). That pins the server to a single replica - `/artifacts` is served from local
+disk by whichever replica the Service picks, so a second one would 404 every trace the first
+stored.
+
+Configuring `storage.s3` replaces it entirely. **No PersistentVolumeClaim is created**, no volume
+is mounted, and the replica limit goes away:
+
+```yaml
+storage:
+  local:
+    enabled: false
+  s3:
+    endpoint: https://s3.us-east-1.amazonaws.com
+    region: us-east-1
+    bucket: kinora-artifacts
+    accessKeyId: ...
+    secretAccessKey: ...
+server:
+  replicaCount: 3
+```
+
+The credentials are optional. Omit both and the server uses the pod's own identity through the
+AWS SDK's default credential chain - on EKS, annotate the ServiceAccount with
+`eks.amazonaws.com/role-arn` and store no key at all.
+
+Add `postgres.enabled: false` with an external database and the release provisions **no cluster
+storage whatsoever**.
+
+Two things about the bucket are invisible until someone opens a trace, because the viewer's
+service worker fetches presigned URLs straight from the browser: it needs CORS for `GET` plus the
+`Range` header, and its endpoint has to resolve from your users' browsers rather than only from
+inside the cluster. [Storage & artifacts](/self-hosting/storage/) has the CORS policy to paste,
+the workload-identity setup, and the rest of the failure modes.
 
 ## Upgrading
 
@@ -149,4 +183,4 @@ kubectl -n kinora delete pvc data-kinora-postgres-0
 
 - [Chart README](https://github.com/amaingot/kinora/tree/main/charts/kinora): every value, with defaults.
 - [Environment variables](/reference/environment/): what each value maps to on the server.
-- [Storage & artifacts](/self-hosting/storage/): PersistentVolume vs S3-compatible store.
+- [Storage & artifacts](/self-hosting/storage/): PersistentVolume vs S3-compatible store, bucket CORS, and workload identity.

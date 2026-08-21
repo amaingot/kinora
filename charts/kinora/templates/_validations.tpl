@@ -35,8 +35,9 @@ that cannot see inside their Secret.
 {{- fail "\nkinora: no source for POSTGRES_PASSWORD.\n\nSet postgres.password, or supply it via secrets.existingSecret / secrets.mappings.\nNote: with the bundled Postgres this value is only read by initdb, on first start. Changing\nit later rewrites the Secret but not the database - rotate with ALTER ROLE first.\n" }}
 {{- end }}
 
-{{- /* resolveS3() returns null unless all five are set, silently falling back to local disk. A
-     half-configured bucket is therefore invisible until someone looks for a trace. */}}
+{{- /* The server activates S3 on endpoint + region + bucket and refuses to boot on a partial
+     set. Credentials are optional - absent means the AWS SDK's default chain (IRSA, EKS Pod
+     Identity, an instance role) - but exactly one of the pair is always a typo. */}}
 {{- $s3 := .Values.storage.s3 }}
 {{- $s3any := or $s3.endpoint $s3.region $s3.bucket $s3.accessKeyId $s3.secretAccessKey }}
 {{- if and $s3any (not (include "kinora.s3.enabled" .)) }}
@@ -44,14 +45,16 @@ that cannot see inside their Secret.
 {{- if not $s3.endpoint }}{{- $missing = append $missing "storage.s3.endpoint" }}{{- end }}
 {{- if not $s3.region }}{{- $missing = append $missing "storage.s3.region" }}{{- end }}
 {{- if not $s3.bucket }}{{- $missing = append $missing "storage.s3.bucket" }}{{- end }}
-{{- fail (printf "\nkinora: S3 storage is partially configured - missing %s.\n\nThe server needs all of endpoint, region, bucket and both credentials; with any one missing\nit silently falls back to local disk, so artifacts would land somewhere you did not\nprovision. Set them all, or none.\n" (join ", " $missing)) }}
+{{- fail (printf "\nkinora: S3 storage is partially configured - missing %s.\n\nThe server needs endpoint, region and bucket together and refuses to boot without all\nthree. Set them all, or none. Credentials are separate and optional: leave\nstorage.s3.accessKeyId and .secretAccessKey empty to use workload identity.\n" (join ", " $missing)) }}
 {{- end }}
 {{- if include "kinora.s3.enabled" . }}
-{{- if not (include "kinora.hasSecret" (dict "ctx" . "key" "S3_ACCESS_KEY_ID" "inline" $s3.accessKeyId)) }}
-{{- fail "\nkinora: storage.s3 is configured but there is no source for S3_ACCESS_KEY_ID.\n\nSet storage.s3.accessKeyId, or supply it via secrets.existingSecret / secrets.mappings.\n" }}
-{{- end }}
-{{- if not (include "kinora.hasSecret" (dict "ctx" . "key" "S3_SECRET_ACCESS_KEY" "inline" $s3.secretAccessKey)) }}
-{{- fail "\nkinora: storage.s3 is configured but there is no source for S3_SECRET_ACCESS_KEY.\n\nSet storage.s3.secretAccessKey, or supply it via secrets.existingSecret / secrets.mappings.\n" }}
+{{- $ak := include "kinora.hasSecret" (dict "ctx" . "key" "S3_ACCESS_KEY_ID" "inline" $s3.accessKeyId) }}
+{{- $sk := include "kinora.hasSecret" (dict "ctx" . "key" "S3_SECRET_ACCESS_KEY" "inline" $s3.secretAccessKey) }}
+{{- /* Neither is a supported configuration (workload identity), both is a supported
+     configuration (static keys), one is always a mistake - and the server refuses to boot on
+     it. Deliberately blind for secrets.existingSecret users, like every other guard here. */}}
+{{- if ne (not $ak) (not $sk) }}
+{{- fail "\nkinora: exactly one S3 credential has a source.\n\nSet BOTH storage.s3.accessKeyId and storage.s3.secretAccessKey (or supply both through\nsecrets.existingSecret / secrets.mappings), or set NEITHER to use workload identity - the\nAWS SDK's default credential chain, which covers EKS IRSA, EKS Pod Identity and instance\nroles. The server refuses to boot with only one, because a lone key is always a typo.\n" }}
 {{- end }}
 {{- end }}
 
@@ -65,6 +68,24 @@ that cannot see inside their Secret.
 {{- if and $wantsMulti (include "kinora.localStorage.enabled" .) }}
 {{- if not (has "ReadWriteMany" .Values.storage.local.accessModes) }}
 {{- fail "\nkinora: more than one server replica needs shared artifact storage.\n\nArtifacts are served off local disk by whichever replica the Service picks, so with a\nReadWriteOnce volume a second replica returns 404 for every trace the first one stored.\n(The Deployment is also pinned to strategy: Recreate for the same reason.)\n\nEither configure storage.s3, or set storage.local.accessModes to include ReadWriteMany.\n" }}
+{{- end }}
+{{- end }}
+
+{{- /* Workload identity on the SHARED account would inject the S3 role's credentials into the
+     internet-facing web pod and into the Postgres container as well - both run under that
+     account, and neither has any use for GetObject/PutObject/DeleteObject. This is silent: the
+     install is green and S3 works, it is just over-granted. Fail with the one-line move. */}}
+{{- $identityAnnotations := list "eks.amazonaws.com/role-arn" "eks.amazonaws.com/audience" "iam.gke.io/gcp-service-account" "azure.workload.identity/client-id" "azure.workload.identity/tenant-id" }}
+{{- range $key, $value := .Values.serviceAccount.annotations }}
+{{- if has $key $identityAnnotations }}
+{{- fail (printf "\nkinora: %s belongs on server.serviceAccount.annotations, not serviceAccount.annotations.\n\nserviceAccount.annotations lands on the account the WEB and POSTGRES pods also run under, so\na role annotated there is injected into the public web tier and the database container too.\nOnly the server touches the artifact bucket. Move it:\n\n  server:\n    serviceAccount:\n      annotations:\n        %s: %s\n" $key $key $value) }}
+{{- end }}
+{{- end }}
+{{- /* ...and the mirror image: annotations aimed at a server account the chart is not creating
+     would vanish without a trace, taking the pod's credentials with them. */}}
+{{- if .Values.server.serviceAccount.annotations }}
+{{- if not (include "kinora.server.serviceAccount.create" .) }}
+{{- fail (printf "\nkinora: server.serviceAccount.annotations is set but the chart is not creating that account.\n\nIt is suppressed by %s, so the annotations would be dropped and the\nserver would fall back to %q. Put them on the ServiceAccount you manage\nyourself, or let the chart create one.\n" (ternary "server.serviceAccount.name" "serviceAccount.create=false" (not (empty .Values.server.serviceAccount.name))) (include "kinora.server.serviceAccountName" .)) }}
 {{- end }}
 {{- end }}
 

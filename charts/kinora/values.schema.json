@@ -353,6 +353,9 @@
             },
             "secretAccessKey": {
               "type": "string"
+            },
+            "forcePathStyle": {
+              "type": "boolean"
             }
           }
         }
@@ -491,6 +494,18 @@
                 "integer",
                 "null"
               ]
+            }
+          }
+        },
+        "serviceAccount": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "annotations": {
+              "type": "object"
+            },
+            "name": {
+              "type": "string"
             }
           }
         },

@@ -5,7 +5,7 @@ type: application
 
 # The chart's own version. Bump it in EVERY PR that touches charts/** - GHCR OCI tags are
 # immutable, so main cannot re-publish a version that already exists.
-version: 0.1.1
+version: 0.2.1
 
 # The kinora release these images/templates were tested against. Backs `image.tag` when that
 # value is empty, so `helm install` with no overrides pulls a pinned, reproducible pair of

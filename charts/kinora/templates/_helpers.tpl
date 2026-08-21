@@ -47,11 +47,37 @@
 {{- end -}}
 {{- end -}}
 
+{{- /* The shared account, used by the web and Postgres pods. Neither talks to a cloud API, so
+     nothing that grants credentials belongs on it - see kinora.server.serviceAccountName. */}}
 {{- define "kinora.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
 {{- default (include "kinora.fullname" .) .Values.serviceAccount.name -}}
 {{- else -}}
 {{- default "default" .Values.serviceAccount.name -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* The server is the only workload with a reason to hold a cloud identity: it is what reads
+     and writes the S3 artifact bucket. So it gets an account of its own, and the workload
+     identity annotation goes there rather than on the shared one - otherwise EKS (or GKE, or
+     Azure) injects the same S3 credentials into the internet-facing web tier and into the
+     database container, both of which have no use for GetObject/PutObject/DeleteObject.
+
+     The migrate initContainer shares the server's pod, so it is covered by this account too.
+
+     Named off the shared account rather than the release, so `serviceAccount.name: foo` yields
+     the matching pair foo (web + postgres) and foo-server. */}}
+{{- define "kinora.server.serviceAccount.create" -}}
+{{- if and .Values.serviceAccount.create (not .Values.server.serviceAccount.name) -}}true{{- end -}}
+{{- end -}}
+
+{{- define "kinora.server.serviceAccountName" -}}
+{{- if .Values.server.serviceAccount.name -}}
+{{- .Values.server.serviceAccount.name -}}
+{{- else if .Values.serviceAccount.create -}}
+{{- printf "%s-server" (include "kinora.serviceAccountName" .) | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- include "kinora.serviceAccountName" . -}}
 {{- end -}}
 {{- end -}}
 
@@ -125,8 +151,9 @@ app.kubernetes.io/component: {{ .component }}
 
 {{- /* ---------------------------------------------------------------- storage */}}
 
-{{- /* S3 is used when the three non-secret coordinates are set; credentials may arrive from an
-     existing Secret, so they are not part of this test (validateValues checks them). */}}
+{{- /* S3 is used when the three non-secret coordinates are set - which is exactly what the
+     server's resolveS3() keys off. Credentials are deliberately not part of this test: they may
+     arrive from an existing Secret, or not exist at all when the pod uses workload identity. */}}
 {{- define "kinora.s3.enabled" -}}
 {{- if and .Values.storage.s3.endpoint .Values.storage.s3.region .Values.storage.s3.bucket -}}true{{- end -}}
 {{- end -}}
@@ -201,9 +228,18 @@ S3_SECRET_ACCESS_KEY: {{ . | toJson }}
 {{- if include "kinora.s3.enabled" . -}}
 {{- /* Presigned S3 artifact URLs live on the bucket's own origin and the trace viewer's service
      worker range-fetches them from the browser, so connect-src 'self' alone would block them.
-     The bucket also needs CORS for GET + Range - see docs/self-hosting/storage. */}}
+     The bucket also needs CORS for GET + Range - see docs/self-hosting/storage.
+
+     Which origin depends on the addressing style: path-style keeps the bucket in the path and
+     the origin is just the endpoint, while virtual-hosted style moves the bucket INTO the
+     hostname. Get this wrong and the dashboard renders perfectly while every trace fails to
+     load, with the only evidence a CSP violation in the browser console. */}}
 {{- $u := urlParse .Values.storage.s3.endpoint -}}
+{{- if .Values.storage.s3.forcePathStyle -}}
 {{- $connect = append $connect (printf "%s://%s" $u.scheme $u.host) -}}
+{{- else -}}
+{{- $connect = append $connect (printf "%s://%s.%s" $u.scheme .Values.storage.s3.bucket $u.host) -}}
+{{- end -}}
 {{- end -}}
 {{- range .Values.web.nginx.extraConnectSrc -}}
 {{- $connect = append $connect . -}}

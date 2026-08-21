@@ -57,6 +57,30 @@ Artifacts are on a {{ .Values.storage.local.size }} PersistentVolumeClaim
 ({{ include "kinora.artifactsClaimName" . }}). It is ReadWriteOnce, which is why the server runs
 a single replica - configure `storage.s3` to scale out.
 {{- end }}
+{{- if include "kinora.s3.enabled" . }}
+
+Artifacts go to s3://{{ .Values.storage.s3.bucket }} at {{ .Values.storage.s3.endpoint }}, so no
+PersistentVolume was created for them. Two things about that bucket are invisible until someone
+opens a trace, because the viewer's service worker fetches it straight from the browser:
+
+  - it needs CORS allowing GET and the Range header from {{ include "kinora.publicUrl" . }},
+    and must expose Content-Range, Content-Length, Accept-Ranges and ETag;
+  - its endpoint has to resolve from your users' browsers, not just from inside the cluster.
+{{- if not (include "kinora.hasSecret" (dict "ctx" . "key" "S3_ACCESS_KEY_ID" "inline" .Values.storage.s3.accessKeyId)) }}
+
+No static S3 credentials were configured, so the server will use the AWS SDK's default
+credential chain. On EKS that means the server's ServiceAccount
+({{ include "kinora.server.serviceAccountName" . }}) needs a role:
+
+  server:
+    serviceAccount:
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::<account>:role/<role>
+
+Without one, this surfaces as CredentialsProviderError on the first artifact upload - not at
+startup, so a green install proves nothing here. Upload a run and check the server logs.
+{{- end }}
+{{- end }}
 {{- if .Values.postgres.enabled }}
 
 The bundled Postgres has no replication, no backups and no connection pooler. For anything you

@@ -61,9 +61,18 @@ export function s3Storage(config: S3Config): Storage {
   const client = new S3Client({
     endpoint: config.endpoint,
     region: config.region,
-    credentials: { accessKeyId: config.accessKey, secretAccessKey: config.secretKey },
-    // Most S3-compatible providers (MinIO, Hetzner) need path-style URLs.
-    forcePathStyle: true,
+    // The key is OMITTED, not set to undefined: @aws-sdk/core only falls through to
+    // credentialDefaultProvider (@aws-sdk/credential-provider-node) when `credentials` is
+    // falsy, and that chain is what resolves IRSA's web identity token file and EKS Pod
+    // Identity's container credentials endpoint. Passing an object of undefined fields instead
+    // memoizes empty credentials and fails signing with a much less obvious error. The SigV4
+    // presigner hoists any resulting session token into X-Amz-Security-Token for us.
+    ...(config.accessKey && config.secretKey
+      ? { credentials: { accessKeyId: config.accessKey, secretAccessKey: config.secretKey } }
+      : {}),
+    // Most S3-compatible providers (MinIO, Hetzner) need path-style URLs, so that is the
+    // default; AWS prefers virtual-hosted style.
+    forcePathStyle: config.forcePathStyle,
   })
   return {
     async put(key, body) {

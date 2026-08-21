@@ -42,14 +42,16 @@ its Polar variables, stops the server from booting.
 
 ## Artifact storage
 
-Leave the `S3_*` variables unset to store artifacts on local disk. Set **all five** to use an
-S3-compatible store instead. See [Storage & artifacts](/self-hosting/storage/).
+Leave the `S3_*` variables unset to store artifacts on local disk. Set the endpoint, region and
+bucket to use an S3-compatible store instead. See
+[Storage & artifacts](/self-hosting/storage/).
 
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `STORAGE_DIR` | `.data/artifacts` | Local directory for artifacts when S3 is not configured. |
-| `S3_ENDPOINT` / `S3_REGION` / `S3_BUCKET` | - | S3-compatible endpoint, region, bucket. |
-| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | - | S3 credentials. |
+| `S3_ENDPOINT` / `S3_REGION` / `S3_BUCKET` | - | S3-compatible endpoint, region, bucket. Required **together**; a partial set stops the server from booting. |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | - | S3 credentials. Optional, and set both or neither: omitting them uses the AWS SDK's default credential chain (EKS IRSA, EKS Pod Identity, instance role). |
+| `S3_FORCE_PATH_STYLE` | `true` | Path-style URLs (`host/bucket/key`). `false` gives virtual-hosted style (`bucket.host/key`), which moves the origin of presigned artifact URLs. |
 
 ## Social login (optional)
 

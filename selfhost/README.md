@@ -56,7 +56,7 @@ automatically (the `migrate` service) before the server starts.
 | `GOOGLE_*` / `GITHUB_*`                               | no       | Social login. Leave empty for email + password only.                       |
 | `OIDC_*`                                              | no       | SSO via any OIDC provider (Okta, Keycloak, Entra ID, ...). See below.      |
 | `KINORA_DISABLE_PASSWORD_AUTH`                        | no       | `true` = SSO-only: no email + password sign-in or sign-up.                 |
-| `S3_*`                                                | no       | Use an S3-compatible store instead of the local volume.                    |
+| `S3_*`                                                | no       | Use an S3-compatible store instead of the local volume ([docs](https://docs.kinora.dev/self-hosting/storage/)). |
 | `KINORA_ARTIFACT_RETENTION_DAYS`                      | no       | Delete stored trace files older than N days, keep the runs. `0` = never.   |
 | `KINORA_RETENTION_DAYS`                               | no       | Delete runs older than N days. `0` = never.                                |
 | `KINORA_KEEP_LAST_RUNS`                               | no       | Keep only the N newest runs per project. `0` = unlimited.                  |

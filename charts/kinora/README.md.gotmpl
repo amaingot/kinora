@@ -167,12 +167,45 @@ server:
   replicaCount: 3
 ```
 
-All five values are required. The server treats a partial configuration as "no S3" and falls
-back to local disk without saying anything, so the chart refuses to render one instead.
+`endpoint`, `region` and `bucket` are required together - the server refuses to boot on a partial
+set, so the chart refuses to render one. **No PersistentVolumeClaim is created**: with S3
+configured, nothing about artifacts touches a disk inside the cluster.
 
-The bucket needs **CORS allowing `GET` and the `Range` header** from your `publicUrl`: the trace
-viewer's service worker range-fetches `trace.zip` straight from the browser. The chart adds the
-bucket's origin to the dashboard's `connect-src` for you.
+Credentials are optional. Leave both empty to use the pod's **workload identity** - the AWS SDK's
+default credential chain, which covers EKS IRSA, EKS Pod Identity and instance roles:
+
+```yaml
+storage:
+  local:
+    enabled: false
+  s3:
+    endpoint: https://s3.us-east-1.amazonaws.com
+    region: us-east-1
+    bucket: kinora-artifacts
+server:
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/kinora
+```
+
+Note `server.serviceAccount.annotations`, **not** `serviceAccount.annotations`. The chart creates
+two ServiceAccounts: one shared by the web and Postgres pods, and `<name>-server` for the server -
+the only workload that touches the bucket. Annotating the shared one would hand the same
+`GetObject`/`PutObject`/`DeleteObject` role to the internet-facing web tier and to the database
+container, so the chart refuses to render a workload-identity annotation there. The server's
+`migrate` initContainer shares its pod and is covered by the same account. If you create the
+ServiceAccount yourself, point `server.serviceAccount.name` at it and annotate your own object.
+
+Set both credentials or neither; one alone is refused at install time, because the server refuses
+to boot on it. `serviceAccount.automountServiceAccountToken: false` does **not** interfere - the
+EKS webhook projects its own separate token volume.
+
+The bucket needs **CORS allowing `GET` and the `Range` header** from your `publicUrl`, and must be
+reachable **from your users' browsers**: artifact URLs are presigned and the trace viewer's
+service worker range-fetches `trace.zip` straight from the browser, so an in-cluster-only endpoint
+cannot work. The chart adds the bucket's origin to the dashboard's `connect-src` for you - which
+is why `forcePathStyle` is a chart value rather than something you set on the server: flipping it
+moves that origin into the hostname, and the CSP follows.
 
 S3 is also what unlocks more than one server replica - see [Scaling](#scaling).
 
