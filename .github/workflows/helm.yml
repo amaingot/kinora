@@ -340,6 +340,31 @@ jobs:
           echo '${{ secrets.GITHUB_TOKEN }}' \
             | helm registry login ghcr.io --username '${{ github.actor }}' --password-stdin
 
+      # A default `helm install` resolves image.tag to the chart's appVersion, so a chart whose
+      # appVersion images do not exist yet installs into ImagePullBackOff. Nothing else catches
+      # this: ci/kind-values.yaml deliberately pins image.tag=latest so the install test does not
+      # depend on release ordering, which means a green pipeline says nothing about whether the
+      # PUBLISHED chart can pull. The images come from an `app-v<appVersion>` tag on docker.yml,
+      # so that tag has to be pushed first - this enforces the ordering AGENTS.md documents
+      # instead of trusting everyone to remember it.
+      - name: appVersion images must exist before publishing
+        run: |
+          APP_VERSION="$(grep -E '^appVersion:' "$CHART_DIR/Chart.yaml" | awk '{print $2}' | tr -d '\"')"
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo '${{ secrets.GITHUB_TOKEN }}' \
+            | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
+          missing=0
+          for image in kinora-server kinora-web; do
+            ref="ghcr.io/$OWNER/$image:$APP_VERSION"
+            if docker manifest inspect "$ref" >/dev/null 2>&1; then
+              echo "ok: $ref exists"
+            else
+              echo "::error file=$CHART_DIR/Chart.yaml::$ref does not exist, so a default install of this chart would ImagePullBackOff. Push the release tag first: git tag app-v$APP_VERSION <sha> && git push origin app-v$APP_VERSION"
+              missing=1
+            fi
+          done
+          exit $missing
+
       # OCI tags are immutable, so GHCR rejects a re-push. A main commit that did not bump the
       # chart version - a README tweak, a merge that skipped the PR check - must not turn the
       # build red. Warn and move on; the prerelease below still publishes.
